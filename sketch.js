@@ -1,7 +1,6 @@
 // ─── Canvas / Grid Config ─────────────────────────────────
 const CANVAS_SIZE = 600;   // logical canvas width/height (cells fill this)
 const NOISE_SCALE = 0.18;
-const HUD_HEIGHT  = 36;    // pixels reserved below the maze for HUD text
 
 let COLS      = 25;
 let ROWS      = 25;
@@ -99,12 +98,17 @@ let cpsFrameCount = 0;
 // ─── p5 Lifecycle ─────────────────────────────────────────
 
 function setup() {
-  createCanvas(COLS * CELL_SIZE, ROWS * CELL_SIZE + HUD_HEIGHT);
+  const cnv = createCanvas(COLS * CELL_SIZE, ROWS * CELL_SIZE);
+  cnv.parent("canvas-container");
   strokeCap(SQUARE);
   initImageInput();
   initResolutionSlider();
   initAlgorithmSelector();
+  initShapeButtons();
+  initToggleButtons();
+  initActionButtons();
   initMaze();
+  updateUI();
 }
 
 function draw() {
@@ -134,7 +138,10 @@ function draw() {
   }
 
   drawGrid();
-  drawHUD();
+  drawModeOverlay();
+
+  // ── Sync sidebar UI every 20 frames (avoids DOM thrashing every frame) ──
+  if (frameCount % 20 === 0) updateUI();
 
   // ── R key: tap to restart animated, hold to rapid-cycle completed mazes ──
   if (keyIsDown(82)) {
@@ -181,6 +188,9 @@ function initMaze() {
     maze.complete(useNoise ? noisePicker : randomPicker);
     computeDistanceMaps();
   }
+
+  updateUI();
+  updateCanvasMeta();
 }
 
 // Instantly finishes a maze and distance map. Called while R is held.
@@ -204,6 +214,7 @@ function rapidRestart() {
   maze.init();
   maze.complete(useNoise ? noisePicker : randomPicker);
   computeDistanceMaps();
+  updateUI();
 }
 
 // ─── Distance Map ─────────────────────────────────────────
@@ -418,37 +429,96 @@ function buildActiveSet(activeArr) {
   return set;
 }
 
-// ─── HUD ──────────────────────────────────────────────────
+// ─── Canvas Mode Overlay ──────────────────────────────────
+// Minimal pill in the top-right corner — keeps the canvas clean.
+// Full status and controls live in the sidebar.
 
-function drawHUD() {
-  const algoLabel = generatorType === "dfs" ? "DFS" : "Prim's";
-  const shape     = PRESETS[presetIndex].name;
+function drawModeOverlay() {
   const modeLabel = mode === MODES.SOLVING ? "SOLVING" :
                     mode === MODES.PLAYING  ? "PLAYING"  :
-                    maze.isDone()           ? "done"     : "generating";
-  const speedStr  = (!maze.isDone() && displayedCPS > 0) ? ` ${displayedCPS}c/s` : "";
-  const flags     = [
-    useNoise      ? "NOISE"    : null,
-    instantMode   ? "INSTANT"  : null,
-    showDistances ? "HEAT"     : null,
-    showRegions   ? "REGIONS"  : null,
-    showFog       ? "FOG"      : null,
-  ].filter(Boolean).join(" ");
+                    maze.isDone()           ? "DONE"     : "GENERATING";
+  const speedStr  = (!maze.isDone() && displayedCPS > 0) ? `  ${displayedCPS}c/s` : "";
+  const label     = modeLabel + speedStr;
+
+  textFont("monospace");
+  textSize(11);
+
+  const tw = textWidth(label);
+  const bx = width - tw - 22;
 
   noStroke();
-  fill("#444");
-  textSize(11);
-  textAlign(LEFT, BOTTOM);
-  textFont("monospace");
+  // Pill background — white with a light border so it sits on the light canvas
+  fill(255, 255, 255, 220);
+  rect(bx - 2, 7, tw + 18, 20, 5);
+  stroke(220, 220, 228);
+  strokeWeight(1);
+  rect(bx - 2, 7, tw + 18, 20, 5);
+  noStroke();
 
-  text(
-    `[${algoLabel}] ${shape}  |  ${modeLabel}${speedStr}${flags ? "  |  " + flags : ""}`,
-    8, height - 20
-  );
-  text(
-    "R=restart  ←/→=shape  N=noise  I=instant  S=solve  P=play  F=fog  G=regions  D=heat  E=export",
-    8, height - 6
-  );
+  if      (mode === MODES.SOLVING) fill("#92400e");
+  else if (mode === MODES.PLAYING) fill("#b91c1c");
+  else if (maze.isDone())          fill("#15803d");
+  else                             fill("#2563eb");
+
+  textAlign(CENTER, CENTER);
+  text(label, bx + (tw + 14) / 2, 17);
+  textAlign(LEFT, BOTTOM);
+}
+
+// ─── Sidebar UI Sync ──────────────────────────────────────
+// These keep the DOM controls in sync with JavaScript state.
+
+function updateUI() {
+  // Mode badge
+  const modeLabel = mode === MODES.SOLVING ? "SOLVING" :
+                    mode === MODES.PLAYING  ? "PLAYING"  :
+                    maze.isDone()           ? "DONE"     : "GENERATING";
+  const modeCls   = mode === MODES.SOLVING ? "solving" :
+                    mode === MODES.PLAYING  ? "playing"  :
+                    maze.isDone()           ? "done"     : "generating";
+
+  const statusMode = document.getElementById("statusMode");
+  if (statusMode) { statusMode.textContent = modeLabel; statusMode.className = `mode-badge ${modeCls}`; }
+
+  const statusAlgo = document.getElementById("statusAlgo");
+  if (statusAlgo) statusAlgo.textContent = generatorType === "dfs" ? "DFS" : "Prim's";
+
+  const statusSpeed = document.getElementById("statusSpeed");
+  if (statusSpeed) statusSpeed.textContent = (!maze.isDone() && displayedCPS > 0) ? `${displayedCPS} cells/s` : "";
+
+  updateToggleStates();
+  updateActionButtonStates();
+  updateShapeButtonStates();
+}
+
+function updateToggleStates() {
+  const toggleMap = {
+    toggleInstant: instantMode,
+    toggleNoise:   useNoise,
+    toggleHeat:    showDistances,
+    toggleRegions: showRegions,
+    toggleFog:     showFog,
+  };
+  for (const [id, active] of Object.entries(toggleMap)) {
+    const btn = document.getElementById(id);
+    if (btn) btn.classList.toggle("active", active);
+  }
+}
+
+function updateActionButtonStates() {
+  document.getElementById("btnSolve")?.classList.toggle("active", mode === MODES.SOLVING);
+  document.getElementById("btnPlay")?.classList.toggle("active",  mode === MODES.PLAYING);
+}
+
+function updateShapeButtonStates() {
+  document.querySelectorAll(".shape-btn").forEach(btn => {
+    btn.classList.toggle("active", parseInt(btn.dataset.preset) === presetIndex);
+  });
+}
+
+function updateCanvasMeta() {
+  const el = document.getElementById("canvasMeta");
+  if (el) el.textContent = `${COLS * CELL_SIZE} × ${ROWS * CELL_SIZE} px  ·  ${COLS} × ${ROWS} cells`;
 }
 
 // ─── Interaction: Mouse ───────────────────────────────────
@@ -484,10 +554,11 @@ function keyPressed() {
   if (key === "e" || key === "E") { saveCanvas("maze", "png"); return; }
 
   if (keyCode === ESCAPE) {
-    mode       = MODES.GENERATING;
-    solver     = null;
-    playerCell = null;
+    mode        = MODES.GENERATING;
+    solver      = null;
+    playerCell  = null;
     revealedSet = new Set();
+    updateUI();
     return;
   }
 
@@ -495,6 +566,7 @@ function keyPressed() {
   if (key === "p" || key === "P") {
     if (mode !== MODES.PLAYING) startPlaying();
     else { mode = MODES.GENERATING; playerCell = null; revealedSet = new Set(); }
+    updateUI();
     return;
   }
 
@@ -521,9 +593,9 @@ function keyPressed() {
   // All remaining controls operate in GENERATING / SOLVING modes
   if (key === "n" || key === "N") { useNoise = !useNoise; initMaze(); }
   if (key === "i" || key === "I") { instantMode = !instantMode; initMaze(); }
-  if (key === "d" || key === "D") { if (distanceMap) showDistances = !showDistances; }
-  if (key === "g" || key === "G") showRegions = !showRegions;
-  if (key === "f" || key === "F") showFog     = !showFog;
+  if (key === "d" || key === "D") { if (distanceMap) showDistances = !showDistances; updateToggleStates(); }
+  if (key === "g" || key === "G") { showRegions = !showRegions; updateToggleStates(); }
+  if (key === "f" || key === "F") { showFog     = !showFog;     updateToggleStates(); }
 
   if (key === "s" || key === "S") {
     if (mode === MODES.GENERATING && maze.isDone()) {
@@ -532,6 +604,8 @@ function keyPressed() {
       mode = MODES.GENERATING;
       solver = null;
     }
+    updateActionButtonStates();
+    updateUI();
   }
 
   if (keyCode === RIGHT_ARROW) {
@@ -542,6 +616,51 @@ function keyPressed() {
     presetIndex = (presetIndex - 1 + PRESETS.length) % PRESETS.length;
     initMaze();
   }
+}
+
+// ─── Sidebar Button Init ──────────────────────────────────
+
+// Shape preset buttons — clicking mirrors the ← → keyboard behavior.
+function initShapeButtons() {
+  document.querySelectorAll(".shape-btn").forEach(btn => {
+    btn.addEventListener("click", () => {
+      presetIndex = parseInt(btn.dataset.preset);
+      initMaze();
+    });
+  });
+}
+
+// Toggle buttons — each mirrors its keyboard shortcut.
+function initToggleButtons() {
+  const actions = {
+    toggleInstant: () => { instantMode   = !instantMode;                      initMaze(); },
+    toggleNoise:   () => { useNoise      = !useNoise;                         initMaze(); },
+    toggleHeat:    () => { if (distanceMap) showDistances = !showDistances; updateToggleStates(); },
+    toggleRegions: () => { showRegions   = !showRegions;                     updateToggleStates(); },
+    toggleFog:     () => { showFog       = !showFog;                         updateToggleStates(); },
+  };
+  for (const [id, fn] of Object.entries(actions)) {
+    document.getElementById(id)?.addEventListener("click", fn);
+  }
+}
+
+// Solve / Play / Export action buttons.
+function initActionButtons() {
+  document.getElementById("btnSolve")?.addEventListener("click", () => {
+    if (mode === MODES.GENERATING && maze.isDone()) startSolving();
+    else if (mode === MODES.SOLVING) { mode = MODES.GENERATING; solver = null; }
+    updateActionButtonStates();
+    updateUI();
+  });
+
+  document.getElementById("btnPlay")?.addEventListener("click", () => {
+    if (mode !== MODES.PLAYING) startPlaying();
+    else { mode = MODES.GENERATING; playerCell = null; revealedSet = new Set(); }
+    updateActionButtonStates();
+    updateUI();
+  });
+
+  document.getElementById("btnExport")?.addEventListener("click", () => saveCanvas("maze", "png"));
 }
 
 // ─── Input Setup ──────────────────────────────────────────
@@ -566,10 +685,10 @@ function initResolutionSlider() {
     COLS      = Number(e.target.value);
     ROWS      = COLS;
     CELL_SIZE = Math.max(1, Math.floor(CANVAS_SIZE / COLS));
-    label.textContent = `${COLS}×${ROWS}`;
+    label.textContent = `${COLS} × ${ROWS}`;
 
     // Resize canvas to the exact pixel grid — eliminates any fractional remainder.
-    resizeCanvas(COLS * CELL_SIZE, ROWS * CELL_SIZE + HUD_HEIGHT);
+    resizeCanvas(COLS * CELL_SIZE, ROWS * CELL_SIZE);
 
     // Rebuild the image mask at the new resolution so it always fits the grid.
     if (loadedImage) {
@@ -577,6 +696,7 @@ function initResolutionSlider() {
     }
 
     initMaze();
+    updateCanvasMeta();
   });
 }
 
@@ -598,6 +718,7 @@ function initImageInput() {
         customMask  = MaskBuilder.fromImage(loadedImage, COLS, ROWS, maskThreshold);
         presetIndex = PRESETS.length - 1;
         initMaze();
+        updateShapeButtonStates();
       });
     };
     reader.readAsDataURL(file);
