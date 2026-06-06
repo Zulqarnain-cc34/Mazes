@@ -4,9 +4,16 @@ An interactive, browser-based maze generator and solver built with [p5.js](https
 
 ---
 
-## Demo
+## Preview
 
-Open `index.html` through any local HTTP server (see [Running Locally](#running-locally)).
+| | |
+|:---:|:---:|
+| ![Completed maze with start and end pins](assets/demo_1.png) | ![BFS solver mid-search — blue cells show the frontier](assets/demo_2.png) |
+| **Completed maze** — Prim's algorithm, 25 × 25 | **BFS solver** — explored cells spreading from start |
+| ![Solved path highlighted in green](assets/demo_3.png) | ![Cross-shaped mask generating live at 33 c/s](assets/demo_5.png) |
+| **Solution path** — green corridor traced to the end | **Shape masking** — Cross preset generating live |
+| ![Sidebar — Generator, Solver and Shape controls](assets/demo_4.png) | ![Sidebar — Seed, Generation toggles and Image Mask](assets/demo_6.png) |
+| **Sidebar** — algorithm pickers and shape selector | **Sidebar** — seeded PRNG, generation options, image mask |
 
 ---
 
@@ -89,7 +96,6 @@ No build step, no bundler, no dependencies to install.
 | `← →` | Cycle preset shapes |
 | `D` | Toggle distance heat map |
 | `G` | Toggle region colours |
-| `N` | Toggle Perlin noise bias |
 | `I` | Toggle instant mode |
 | `F` | Toggle fog of war |
 | `E` | Export PNG |
@@ -112,9 +118,10 @@ project/
     ├── core/
     │   ├── constants.js            ← CELL_STATES, DIRECTIONS (named exports)
     │   ├── Cell.js                 ← single grid cell (walls, state, region)
-    │   └── MazeGrid.js             ← 2D cell array, wall removal, passable-neighbor queries
+    │   ├── MazeGrid.js             ← 2D cell array, wall removal, passable-neighbor queries
+    │   └── prng.js                 ← mulberry32 seeded PRNG + randomSeed helper
     ├── generators/
-    │   ├── MazeGenerator.js        ← abstract base class
+    │   ├── MazeGenerator.js        ← abstract base class (holds this.rng)
     │   ├── FrontierEntry.js        ← (in, out) pair used by Prim's
     │   ├── PrimsGenerator.js
     │   ├── DFSGenerator.js
@@ -132,8 +139,10 @@ project/
     ├── analysis/
     │   ├── BFSTraverser.js         ← strategy: BFS over open passages
     │   └── DistanceMap.js          ← computes + stores cell distances for heatmap
-    └── mask/
-        └── MaskBuilder.js          ← preset shapes + image-to-mask conversion (Otsu's)
+    ├── mask/
+    │   └── MaskBuilder.js          ← preset shapes + image-to-mask conversion (Otsu's)
+    └── worker/
+        └── generatorWorker.js      ← Web Worker: runs generation off the main thread
 ```
 
 ---
@@ -151,9 +160,9 @@ init()              // reset grid state, seed the first cell
 step(pickIndex)     // advance one unit of work
 ```
 
-`pickIndex` is a function `(candidates[]) → index` that selects which candidate to use. Passing `noisePicker` instead of `randomPicker` biases generation toward Perlin noise values — no algorithm changes required.
+`pickIndex` is a function `(candidates[]) → index` that selects which candidate to use. The default is the module-level `randomPicker`, which draws from the current seeded PRNG (`mulberry32`). All seven generators honour `this.rng` — injecting a seeded instance makes every algorithm fully reproducible from a single integer.
 
-`sketch.js` calls `maze.step()` once (or more, controlled by the speed slider) per `draw()` frame. The `frontier` array and `lastAddedCell` property on every generator give the renderer enough information to draw the active state without any coupling to algorithm internals.
+`sketch.js` calls `maze.step(randomPicker)` once (or more, controlled by the speed slider) per `draw()` frame. The `frontier` array and `lastAddedCell` property on every generator give the renderer enough information to draw the active state without any coupling to algorithm internals.
 
 ### Solvers
 
@@ -246,8 +255,9 @@ Then add an entry to the `PRESETS` array in `js/sketch.js` and a button in `inde
 | **Rendering** | [p5.js](https://p5js.org/) v1 — instance mode |
 | **Modules** | Native ES Modules (`import` / `export`) — no bundler |
 | **Styling** | Plain CSS with custom properties |
+| **PRNG** | mulberry32 — seeded, reproducible, statistically sound |
+| **Concurrency** | Web Worker for off-thread instant-mode generation |
 | **Image processing** | Otsu's method for automatic threshold selection |
-| **Noise** | p5.js built-in Perlin noise (`p.noise()`) |
 | **Runtime** | Any modern browser; served over HTTP |
 
 ---
