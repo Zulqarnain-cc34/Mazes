@@ -2,8 +2,9 @@
 // "out" means the cell has not been added to the maze yet.
 // "in"  means the cell has been added to the maze.
 const CELL_STATES = Object.freeze({
-  OUT: "out",
-  IN:  "in",
+  OUT:      "out",       // not yet added to the maze
+  IN:       "in",        // added to the maze
+  EXCLUDED: "excluded",  // outside the shape — never touched by any algorithm
 });
 
 // The four directions a cell can connect to a neighbor.
@@ -50,6 +51,16 @@ class Cell {
   // Marks this cell as part of the maze.
   markIn() {
     this.state = CELL_STATES.IN;
+  }
+
+  // Returns true if this cell is outside the shape and excluded from the maze.
+  isExcluded() {
+    return this.state === CELL_STATES.EXCLUDED;
+  }
+
+  // Marks this cell as excluded from the maze permanently.
+  markExcluded() {
+    this.state = CELL_STATES.EXCLUDED;
   }
 
   // Removes the wall on a given direction of this cell.
@@ -164,6 +175,45 @@ class MazeGrid {
     for (const [direction, delta] of Object.entries(DIRECTIONS)) {
       if (delta.colDelta === colDelta && delta.rowDelta === rowDelta) {
         return direction;
+      }
+    }
+
+    return null;
+  }
+
+  // Applies a boolean mask to the grid.
+  // mask[row][col] = true  → cell is included (stays OUT, available for maze)
+  // mask[row][col] = false → cell is excluded (marked EXCLUDED, invisible to algorithms)
+  applyMask(mask) {
+    for (let row = 0; row < this.rows; row++) {
+      for (let col = 0; col < this.cols; col++) {
+        if (!mask[row][col]) {
+          this.cells[row][col].markExcluded();
+        }
+      }
+    }
+  }
+
+  // Returns the first cell whose state is OUT (included but not yet in the maze).
+  // Returns null when no such cell exists — all included cells have been visited.
+  findFirstOutCell() {
+    for (let row = 0; row < this.rows; row++) {
+      for (let col = 0; col < this.cols; col++) {
+        const cell = this.cells[row][col];
+        if (cell.isOut()) return cell;
+      }
+    }
+
+    return null;
+  }
+
+  // Returns the first cell whose state is IN.
+  // Used to find a valid BFS start after generation when (0,0) may be excluded.
+  findFirstInCell() {
+    for (let row = 0; row < this.rows; row++) {
+      for (let col = 0; col < this.cols; col++) {
+        const cell = this.cells[row][col];
+        if (cell.isIn()) return cell;
       }
     }
 
@@ -319,6 +369,202 @@ class PrimsMaze {
     this.frontier[index]         = this.frontier[this.frontier.length - 1];
     this.frontier.length        -= 1;
     return entry;
+  }
+}
+
+// ─────────────────────────────────────────────
+// MultiRegionPrims
+// Runs Prim's algorithm across an entire masked
+// grid, handling disconnected regions automatically.
+//
+// When one region's frontier empties, it finds the
+// next unvisited OUT cell and starts a new Prim's
+// run there. Each region becomes its own perfect maze.
+//
+// Exposes the same interface as PrimsMaze so
+// sketch.js needs no branching logic.
+// ─────────────────────────────────────────────
+
+class MultiRegionPrims {
+  constructor(grid) {
+    if (!(grid instanceof MazeGrid)) {
+      throw new TypeError("MultiRegionPrims requires a MazeGrid.");
+    }
+
+    this.grid          = grid;
+    this.frontier      = [];
+    this.lastAddedCell = null;
+    this.done          = false;
+  }
+
+  // Finds the first OUT cell and seeds the first region.
+  init() {
+    this.frontier      = [];
+    this.lastAddedCell = null;
+    this.done          = false;
+
+    const startCell = this.grid.findFirstOutCell();
+
+    if (!startCell) {
+      this.done = true;
+      return;
+    }
+
+    this.addCellToMaze(startCell);
+  }
+
+  // Runs one iteration. If the current region is exhausted, starts the next one.
+  // Each call adds exactly one cell to the maze.
+  step(pickIndex = (frontier) => Math.floor(Math.random() * frontier.length)) {
+    if (this.done) {
+      return;
+    }
+
+    while (this.frontier.length > 0) {
+      const index = pickIndex(this.frontier);
+      const entry = this.removeAtIndex(index);
+
+      if (entry.outCell.isIn()) {
+        continue;
+      }
+
+      this.grid.removeWallBetween(entry.inCell, entry.outCell);
+      this.addCellToMaze(entry.outCell);
+      return;
+    }
+
+    // Current region exhausted. Find the next unvisited included cell.
+    const nextCell = this.grid.findFirstOutCell();
+
+    if (nextCell) {
+      this.addCellToMaze(nextCell);
+    } else {
+      this.done = true;
+    }
+  }
+
+  isDone() {
+    return this.done;
+  }
+
+  complete(pickIndex = (frontier) => Math.floor(Math.random() * frontier.length)) {
+    while (!this.done) {
+      this.step(pickIndex);
+    }
+  }
+
+  // Marks a cell as in, records it as lastAddedCell, and pushes its
+  // included out-neighbors into the frontier.
+  addCellToMaze(cell) {
+    cell.markIn();
+    this.lastAddedCell = cell;
+
+    const neighbors = this.grid.getNeighbors(cell.col, cell.row);
+
+    for (const { cell: neighbor } of neighbors) {
+      if (neighbor.isOut()) {
+        this.frontier.push(new FrontierEntry(cell, neighbor));
+      }
+    }
+  }
+
+  removeAtIndex(index) {
+    const entry                  = this.frontier[index];
+    this.frontier[index]         = this.frontier[this.frontier.length - 1];
+    this.frontier.length        -= 1;
+    return entry;
+  }
+}
+
+// ─────────────────────────────────────────────
+// MaskBuilder
+// Produces boolean[row][col] mask arrays.
+// true  = cell is included in the maze
+// false = cell is excluded (outside the shape)
+//
+// Static factory methods — one per mask type.
+// To add a new shape, add a new static method here.
+// ─────────────────────────────────────────────
+
+class MaskBuilder {
+  // Full grid — all cells included. Default, no shape constraint.
+  static fullGrid(cols, rows) {
+    return Array.from({ length: rows }, () => Array(cols).fill(true));
+  }
+
+  // Cross / plus shape centered on the grid.
+  static cross(cols, rows) {
+    const midC   = Math.floor(cols / 2);
+    const midR   = Math.floor(rows / 2);
+    const armW   = Math.floor(cols * 0.22);
+
+    return Array.from({ length: rows }, (_, row) =>
+      Array.from({ length: cols }, (_, col) => {
+        const inHBar = row >= midR - armW && row <= midR + armW;
+        const inVBar = col >= midC - armW && col <= midC + armW;
+        return inHBar || inVBar;
+      })
+    );
+  }
+
+  // Two separate rectangles — clearly shows the multi-region feature.
+  // Top-left box and bottom-right box have no connection between them.
+  static twoBoxes(cols, rows) {
+    return Array.from({ length: rows }, (_, row) =>
+      Array.from({ length: cols }, (_, col) => {
+        const inTopLeft     = row >= 2  && row < Math.floor(rows * 0.42) &&
+                              col >= 2  && col < Math.floor(cols * 0.45);
+        const inBottomRight = row >= Math.floor(rows * 0.58) && row < rows - 2 &&
+                              col >= Math.floor(cols * 0.55) && col < cols - 2;
+        return inTopLeft || inBottomRight;
+      })
+    );
+  }
+
+  // Hollow frame — a rectangle with a rectangular hole in the center.
+  // The ring itself is one connected region.
+  static ring(cols, rows) {
+    const borderW = Math.floor(cols * 0.12);
+    const borderH = Math.floor(rows * 0.12);
+
+    return Array.from({ length: rows }, (_, row) =>
+      Array.from({ length: cols }, (_, col) => {
+        const insideOuter = row >= 1 && row < rows - 1 && col >= 1 && col < cols - 1;
+        const insideInner = row > borderH && row < rows - borderH - 1 &&
+                            col > borderW && col < cols - borderW - 1;
+        return insideOuter && !insideInner;
+      })
+    );
+  }
+
+  // Diamond shape.
+  static diamond(cols, rows) {
+    const cx = cols / 2;
+    const cy = rows / 2;
+
+    return Array.from({ length: rows }, (_, row) =>
+      Array.from({ length: cols }, (_, col) => {
+        const dx = Math.abs(col - cx) / (cols / 2);
+        const dy = Math.abs(row - cy) / (rows / 2);
+        return dx + dy <= 0.95;
+      })
+    );
+  }
+
+  // Creates a mask from a p5.js image object.
+  // Dark pixels (brightness < threshold) = included.
+  // Call after loadImage() and in setup() or after image is ready.
+  static fromImage(img, cols, rows, threshold = 128) {
+    img.resize(cols, rows);
+    img.loadPixels();
+
+    return Array.from({ length: rows }, (_, row) =>
+      Array.from({ length: cols }, (_, col) => {
+        const i = (row * cols + col) * 4;
+        const brightness = (img.pixels[i] + img.pixels[i + 1] + img.pixels[i + 2]) / 3;
+        return brightness < threshold;
+      })
+    );
   }
 }
 

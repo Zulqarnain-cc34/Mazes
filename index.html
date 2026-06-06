@@ -5,30 +5,92 @@
     <meta http-equiv="X-UA-Compatible" content="IE=edge" />
     <title>Prim's Maze</title>
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-
     <link rel="stylesheet" href="style.css" />
-    <script src="https://cdn.jsdelivr.net/npm/p5@1/lib/p5.min.js"></script>
 
-    <script type="text/javascript" src="board.js"></script>
-    <script type="text/javascript" src="sketch.js"></script>
     <style>
-      html,
-      body {
+      html, body {
         margin: 0;
-        height: 100%;
+        min-height: 100%;
         background: #fdfdfd;
+        font-family: system-ui, sans-serif;
       }
 
       body {
-        display: grid;
+        display: flex;
+        flex-direction: column;
         align-items: center;
         justify-content: center;
+        gap: 14px;
+        padding: 24px 0;
       }
 
       canvas {
         box-shadow: 0 5px 30px 0 rgba(0, 0, 0, 0.1);
       }
+
+      .controls {
+        display: flex;
+        align-items: center;
+        gap: 16px;
+        flex-wrap: wrap;
+        justify-content: center;
+      }
+
+      /* Hidden real input, visible styled label */
+      .upload-btn {
+        display: inline-block;
+        padding: 8px 18px;
+        background: #1a1a2e;
+        color: #eaeaea;
+        border-radius: 6px;
+        font-size: 13px;
+        font-family: monospace;
+        cursor: pointer;
+      }
+      .upload-btn:hover { background: #2e2e52; }
+
+      input[type="file"] { display: none; }
+
+      .slider-group {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        font-size: 13px;
+        font-family: monospace;
+        color: #555;
+      }
+
+      input[type="range"] {
+        width: 120px;
+        cursor: pointer;
+        accent-color: #1a1a2e;
+      }
+
+      .hint {
+        font-size: 11px;
+        color: #aaa;
+        font-family: monospace;
+      }
     </style>
   </head>
-  <body></body>
+
+  <body>
+    <div class="controls">
+      <label class="upload-btn" for="imgInput">Upload Image</label>
+      <input type="file" id="imgInput" accept="image/*" />
+
+      <div class="slider-group">
+        <span>Threshold:</span>
+        <input type="range" id="threshold" min="0" max="255" value="128" />
+        <span id="thresholdValue">128</span>
+      </div>
+
+      <span class="hint">Dark pixels = maze &nbsp;|&nbsp; White = excluded</span>
+    </div>
+
+    <!-- Scripts at end of body so the DOM is fully ready when p5 calls setup() -->
+    <script src="https://cdn.jsdelivr.net/npm/p5@1/lib/p5.min.js"></script>
+    <script src="board.js"></script>
+    <script src="sketch.js"></script>
+  </body>
 </html>
