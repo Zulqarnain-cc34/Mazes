@@ -1,6 +1,8 @@
-const COLS      = 25;
-const ROWS      = 25;
-const CELL_SIZE = 24;
+const CANVAS_SIZE = 600;  // fixed canvas width and height in pixels
+
+let COLS      = 25;
+let ROWS      = 25;
+let CELL_SIZE = Math.floor(CANVAS_SIZE / COLS);
 
 const NOISE_SCALE = 0.18;
 
@@ -36,12 +38,20 @@ let distanceMap   = null;
 let showDistances = false;
 let useNoise      = false;
 let instantMode   = false;
-let presetIndex   = 0;        // which preset shape is active
+let presetIndex   = 0;
+
+// R hold-to-cycle state.
+// After holding R for HOLD_DELAY frames, a new complete maze is generated
+// every HOLD_INTERVAL frames until R is released.
+const HOLD_DELAY    = 18;  // frames before rapid mode starts (~0.3s at 60fps)
+const HOLD_INTERVAL = 7;   // frames between each rapid restart
+let   rHoldFrames   = 0;
 
 function setup() {
   createCanvas(COLS * CELL_SIZE, ROWS * CELL_SIZE + 36);
   strokeCap(SQUARE);
   initImageInput();
+  initResolutionSlider();
   initMaze();
 }
 
@@ -62,6 +72,62 @@ function draw() {
 
   drawGrid();
   drawHUD();
+
+  // R key — single press restarts with animation, hold cycles rapid complete mazes.
+  // Handled entirely in draw() so browser key-repeat does not interfere.
+  if (keyIsDown(82)) {
+    rHoldFrames++;
+
+    if (rHoldFrames === 1) {
+      // Very first frame the key goes down: normal animated restart.
+      initMaze();
+    } else if (rHoldFrames > HOLD_DELAY && (rHoldFrames - HOLD_DELAY) % HOLD_INTERVAL === 0) {
+      // After hold threshold: rapid-cycle through complete mazes.
+      rapidRestart();
+    }
+  } else {
+    rHoldFrames = 0;
+  }
+}
+
+// Instantly builds a complete maze and recomputes the distance map if active.
+// Called repeatedly while R is held to rapidly cycle through mazes.
+function rapidRestart() {
+  initMaze();
+  maze.complete(useNoise ? noisePicker : randomPicker);
+
+  if (showDistances) {
+    const startCell = maze.grid.findFirstInCell();
+    if (startCell) {
+      distanceMap = new DistanceMap(maze.grid, new BFSTraverser());
+      distanceMap.compute(startCell.col, startCell.row);
+    }
+  }
+}
+
+// ─── Resolution slider ────────────────────────────────────────
+
+function initResolutionSlider() {
+  const slider = document.getElementById("resolution");
+  const label  = document.getElementById("resolutionValue");
+
+  slider.addEventListener("input", (e) => {
+    COLS      = Number(e.target.value);
+    ROWS      = COLS;
+    CELL_SIZE = Math.max(1, Math.floor(CANVAS_SIZE / COLS));
+    label.textContent = `${COLS}×${ROWS}`;
+
+    // Resize canvas to exact grid pixel size — no fractional remainder.
+    resizeCanvas(COLS * CELL_SIZE, ROWS * CELL_SIZE + 36);
+
+    // Rebuild the image mask at the new resolution so the full image
+    // is always re-sampled to fit the new grid exactly.
+    if (loadedImage) {
+      customMask = MaskBuilder.fromImage(loadedImage, COLS, ROWS, maskThreshold);
+    }
+
+    initMaze();
+  });
 }
 
 // ─── Image input ──────────────────────────────────────────────
@@ -81,6 +147,14 @@ function initImageInput() {
     reader.onload = (event) => {
       loadImage(event.target.result, (img) => {
         loadedImage   = img;
+
+        // Compute the best threshold for this image automatically.
+        maskThreshold = MaskBuilder.otsuThreshold(img);
+
+        // Sync the slider and label to the computed value.
+        thresholdSlider.value          = maskThreshold;
+        thresholdLabel.textContent     = maskThreshold;
+
         customMask    = MaskBuilder.fromImage(loadedImage, COLS, ROWS, maskThreshold);
         presetIndex   = PRESETS.length - 1;
         initMaze();
@@ -110,10 +184,11 @@ function initMaze() {
   const mask = PRESETS[presetIndex].build();
   grid.applyMask(mask);
 
-  maze          = new MultiRegionPrims(grid);
-  frontierSet   = new Set();
-  distanceMap   = null;
-  showDistances = false;
+  maze        = new MultiRegionPrims(grid);
+  frontierSet = new Set();
+  distanceMap = null;
+  // showDistances is intentionally not reset here so the heatmap
+  // stays on across restarts if the user had it enabled.
 
   maze.init();
 
@@ -125,8 +200,8 @@ function initMaze() {
 // ─── Rendering ────────────────────────────────────────────────
 
 function drawGrid() {
-  for (let row = 0; row < ROWS; row++) {
-    for (let col = 0; col < COLS; col++) {
+  for (let row = 0; row < maze.grid.rows; row++) {
+    for (let col = 0; col < maze.grid.cols; col++) {
       drawCell(maze.grid.getCell(col, row));
     }
   }
@@ -224,10 +299,6 @@ function drawHUD() {
 // ─── Interaction ──────────────────────────────────────────────
 
 function keyPressed() {
-  if (key === "r" || key === "R") {
-    initMaze();
-  }
-
   if (key === "n" || key === "N") {
     useNoise = !useNoise;
     initMaze();
