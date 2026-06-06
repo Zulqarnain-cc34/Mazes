@@ -255,8 +255,6 @@ Then add an entry to the `PRESETS` array in `js/sketch.js` and a button in `inde
 | **Rendering** | [p5.js](https://p5js.org/) v1 — instance mode |
 | **Modules** | Native ES Modules (`import` / `export`) — no bundler |
 | **Styling** | Plain CSS with custom properties |
-| **PRNG** | mulberry32 — seeded, reproducible, statistically sound |
-| **Concurrency** | Web Worker for off-thread instant-mode generation |
 | **Image processing** | Otsu's method for automatic threshold selection |
 | **Runtime** | Any modern browser; served over HTTP |
 
