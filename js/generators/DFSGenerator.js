@@ -26,7 +26,7 @@ export default class DFSGenerator extends MazeGenerator {
 
   // pickIndex selects which unvisited neighbor to explore next.
   // Items passed are { direction, cell } objects from getNeighbors().
-  step(pickIndex = (arr) => Math.floor(Math.random() * arr.length)) {
+  step(pickIndex = (arr) => Math.floor(this.rng() * arr.length)) {
     if (this.done) return;
 
     if (this.frontier.length === 0) {

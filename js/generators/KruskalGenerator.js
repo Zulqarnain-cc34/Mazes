@@ -43,7 +43,7 @@ export default class KruskalGenerator extends MazeGenerator {
 
     // Fisher-Yates shuffle — gives each wall a uniformly random priority.
     for (let i = this._walls.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
+      const j = Math.floor(this.rng() * (i + 1));
       [this._walls[i], this._walls[j]] = [this._walls[j], this._walls[i]];
     }
 

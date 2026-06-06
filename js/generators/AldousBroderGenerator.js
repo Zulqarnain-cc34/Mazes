@@ -65,7 +65,7 @@ export default class AldousBroderGenerator extends MazeGenerator {
                           .filter(({ cell }) => !cell.isExcluded());
     if (!nbrs.length) { this._nextRegion(); return; }
 
-    const { cell: next } = nbrs[Math.floor(Math.random() * nbrs.length)];
+    const { cell: next } = nbrs[Math.floor(this.rng() * nbrs.length)];
 
     if (next.isOut()) {
       this.grid.removeWallBetween(this._current, next);

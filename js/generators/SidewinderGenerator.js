@@ -64,14 +64,14 @@ export default class SidewinderGenerator extends MazeGenerator {
       // Top boundary — only option is east.
       if (!atEast) this.grid.removeWallBetween(cell, eastCell);
       else         this._currentRun = [];
-    } else if (atEast || Math.random() < 0.5) {
+    } else if (atEast || this.rng() < 0.5) {
       // Close the run: carve north from a random run member.
       const withNorth = this._currentRun.filter(c =>
         this.grid.isInsideGrid(c.col, c.row - 1) &&
         !this.grid.getCell(c.col, c.row - 1).isExcluded()
       );
       if (withNorth.length) {
-        const chosen = withNorth[Math.floor(Math.random() * withNorth.length)];
+        const chosen = withNorth[Math.floor(this.rng() * withNorth.length)];
         this.grid.removeWallBetween(chosen, this.grid.getCell(chosen.col, chosen.row - 1));
       }
       this._currentRun = [];

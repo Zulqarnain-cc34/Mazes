@@ -26,7 +26,7 @@ export default class PrimsGenerator extends MazeGenerator {
     this._addCell(startCell);
   }
 
-  step(pickIndex = (arr) => Math.floor(Math.random() * arr.length)) {
+  step(pickIndex = (arr) => Math.floor(this.rng() * arr.length)) {
     if (this.done) return;
 
     while (this.frontier.length > 0) {

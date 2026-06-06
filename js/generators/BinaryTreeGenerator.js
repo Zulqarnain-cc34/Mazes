@@ -57,7 +57,7 @@ export default class BinaryTreeGenerator extends MazeGenerator {
     if (east  && !east.isExcluded())  candidates.push(east);
 
     if (candidates.length) {
-      const chosen = candidates[Math.floor(Math.random() * candidates.length)];
+      const chosen = candidates[Math.floor(this.rng() * candidates.length)];
       this.grid.removeWallBetween(cell, chosen);
     }
 

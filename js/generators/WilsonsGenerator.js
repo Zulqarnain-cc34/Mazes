@@ -79,7 +79,7 @@ export default class WilsonsGenerator extends MazeGenerator {
                              .filter(({ cell }) => !cell.isExcluded());
     if (!nbrs.length) { this.done = true; return; }
 
-    const { cell: next } = nbrs[Math.floor(Math.random() * nbrs.length)];
+    const { cell: next } = nbrs[Math.floor(this.rng() * nbrs.length)];
 
     if (next.isIn()) {
       // Walk has reached the maze — carve the entire path at once.

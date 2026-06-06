@@ -26,6 +26,9 @@ export default class MazeGenerator {
     this.currentRegionIndex = 0;
     this._stepCount         = 0;
     this._startTime         = null;
+    // Replaceable RNG: set to mulberry32(seed) for reproducible mazes.
+    // Default is Math.random so the generator works without any extra setup.
+    this.rng = Math.random;
   }
 
   // Reset and seed the first cell. Must be called before step().
@@ -45,7 +48,8 @@ export default class MazeGenerator {
 
   // Runs all remaining steps in one call (instant mode).
   // pickIndex signature: (candidateArray) → integer index
-  complete(pickIndex = (arr) => Math.floor(Math.random() * arr.length)) {
+  // Defaults to this.rng so it honours whatever PRNG was injected.
+  complete(pickIndex = (arr) => Math.floor(this.rng() * arr.length)) {
     while (!this.done) this.step(pickIndex);
   }
 
