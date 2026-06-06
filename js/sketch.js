@@ -14,10 +14,10 @@ import AStarSolver             from './solvers/AStarSolver.js';
 import DeadEndFillSolver       from './solvers/DeadEndFillSolver.js';
 import WallFollowerSolver      from './solvers/WallFollowerSolver.js';
 import { DIRECTIONS }          from './core/constants.js';
+import { mulberry32, randomSeed } from './core/prng.js';
 
 // ─── Canvas / Grid Config ─────────────────────────────────
 const CANVAS_SIZE = 600;
-const NOISE_SCALE = 0.18;
 
 let COLS      = 25;
 let ROWS      = 25;
@@ -101,11 +101,24 @@ let presetIndex   = 0;
 let stepsPerFrame   = 1;
 let stepAccumulator = 0;
 
-let useNoise      = false;
 let instantMode   = false;
 let showDistances = false;
 let showRegions   = false;
 let showFog       = false;
+
+// ─── Seeded PRNG ──────────────────────────────────────────
+// One seed → one deterministic maze. Stored as an unsigned 32-bit int.
+// Set fixedSeed = true when the user types a specific seed so that
+// restarting with R replays the exact same maze.
+let currentSeed = randomSeed();
+let fixedSeed   = false;
+let rng         = mulberry32(currentSeed); // module-level; shared by randomPicker + generators
+
+// ─── Web Worker ───────────────────────────────────────────
+// When enabled, instant-mode generation runs in a background thread
+// so the main thread (and therefore the UI) never blocks.
+let useWorker    = false;
+let activeWorker = null; // current Worker instance, or null
 
 // ─── Ink Reveal State ────────────────────────────────────
 // When inkReveal is on, the finished maze draws itself wall by
@@ -156,6 +169,7 @@ new p5(function(p) {
     initShapeButtons();
     initToggleButtons();
     initActionButtons();
+    initSeedInput();
     initMaze();
     updateUI();
   };
@@ -166,14 +180,18 @@ new p5(function(p) {
     // Advance generation
     if (mode === MODES.GENERATING) {
       if (!maze.isDone()) {
-        stepAccumulator += stepsPerFrame;
-        while (stepAccumulator >= 1 && !maze.isDone()) {
-          maze.step(useNoise ? noisePicker : randomPicker);
-          stepAccumulator -= 1;
+        if (!activeWorker) {
+          // Normal step-by-step on the main thread
+          stepAccumulator += stepsPerFrame;
+          while (stepAccumulator >= 1 && !maze.isDone()) {
+            maze.step(randomPicker);
+            stepAccumulator -= 1;
+          }
+          frontierSet = buildActiveSet(maze.frontier);
+          cpsFrameCount++;
+          if (cpsFrameCount % 20 === 0) displayedCPS = maze.cellsPerSecond;
         }
-        frontierSet = buildActiveSet(maze.frontier);
-        cpsFrameCount++;
-        if (cpsFrameCount % 20 === 0) displayedCPS = maze.cellsPerSecond;
+        // else: worker is running in the background — nothing to step here
       } else if (!distanceMap) {
         computeDistanceMaps();
         if (inkReveal) startInkReveal();
@@ -296,7 +314,6 @@ new p5(function(p) {
     if (p.keyCode === p.RIGHT_ARROW) { presetIndex = (presetIndex + 1) % PRESETS.length; initMaze(); }
     if (p.keyCode === p.LEFT_ARROW)  { presetIndex = (presetIndex - 1 + PRESETS.length) % PRESETS.length; initMaze(); }
 
-    if (p.key === "n" || p.key === "N") { useNoise    = !useNoise;    initMaze(); }
     if (p.key === "i" || p.key === "I") { instantMode = !instantMode; initMaze(); }
     if (p.key === "d" || p.key === "D") { if (distanceMap) showDistances = !showDistances; updateToggleStates(); }
     if (p.key === "g" || p.key === "G") { showRegions = !showRegions; updateToggleStates(); }
@@ -327,11 +344,20 @@ new p5(function(p) {
 
   // ── Maze Initialization ─────────────────────────────────
   function initMaze() {
+    // Cancel any worker still running from the previous maze
+    if (activeWorker) { activeWorker.terminate(); activeWorker = null; }
+
+    // Advance to a new seed unless the user has locked one in via the seed input
+    if (!fixedSeed) currentSeed = randomSeed();
+    rng = mulberry32(currentSeed);
+    updateSeedDisplay();
+
     const grid = new MazeGrid(COLS, ROWS);
     grid.applyMask(PRESETS[presetIndex].build());
 
     const factory = GENERATOR_MAP[generatorType] ?? GENERATOR_MAP.prims;
     maze = factory(grid);
+    maze.rng = rng; // inject seeded PRNG — all generators use this.rng() internally
 
     frontierSet    = new Set();
     distanceMap    = null;
@@ -358,22 +384,34 @@ new p5(function(p) {
     maze.init();
 
     if (instantMode) {
-      maze.complete(useNoise ? noisePicker : randomPicker);
-      computeDistanceMaps();
-      if (inkReveal) startInkReveal();
+      if (useWorker) {
+        runWithWorker(); // async — completes via onmessage callback
+      } else {
+        maze.complete(randomPicker);
+        computeDistanceMaps();
+        if (inkReveal) startInkReveal();
+      }
     }
 
     updateUI();
     updateCanvasMeta();
   }
 
-  // Instantly finishes a maze. Called while R is held.
+  // Instantly finishes a maze. Called while R is held for rapid-cycling.
   function rapidRestart() {
+    if (activeWorker) { activeWorker.terminate(); activeWorker = null; }
+
+    // Fresh seed for each rapid cycle (unless the user has a fixed seed)
+    if (!fixedSeed) currentSeed = randomSeed();
+    rng = mulberry32(currentSeed);
+    updateSeedDisplay();
+
     const grid = new MazeGrid(COLS, ROWS);
     grid.applyMask(PRESETS[presetIndex].build());
 
     const factory = GENERATOR_MAP[generatorType] ?? GENERATOR_MAP.prims;
     maze = factory(grid);
+    maze.rng = rng;
 
     frontierSet   = new Set();
     solver        = null;
@@ -393,7 +431,13 @@ new p5(function(p) {
     if (wallBuffer) { wallBuffer.remove(); wallBuffer = null; }
 
     maze.init();
-    maze.complete(useNoise ? noisePicker : randomPicker);
+
+    if (useWorker) {
+      runWithWorker(); // async — updateUI() fires in the worker's onmessage
+      return;
+    }
+
+    maze.complete(randomPicker);
     computeDistanceMaps();
     if (inkReveal) startInkReveal();
     updateUI();
@@ -522,9 +566,9 @@ new p5(function(p) {
       }
     }
 
-    // Fisher-Yates shuffle — organic random draw order
+    // Fisher-Yates shuffle — uses seeded rng for a reproducible draw order
     for (let i = segs.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
+      const j = Math.floor(rng() * (i + 1));
       [segs[i], segs[j]] = [segs[j], segs[i]];
     }
 
@@ -661,17 +705,7 @@ new p5(function(p) {
 
   // ── Pickers ─────────────────────────────────────────────
   function randomPicker(items) {
-    return Math.floor(Math.random() * items.length);
-  }
-
-  function noisePicker(items) {
-    let bestIndex = 0, bestScore = -1;
-    for (let i = 0; i < items.length; i++) {
-      const c = items[i].outCell || items[i].cell || items[i];
-      const s = p.noise(c.col * NOISE_SCALE, c.row * NOISE_SCALE);
-      if (s > bestScore) { bestScore = s; bestIndex = i; }
-    }
-    return bestIndex;
+    return Math.floor(rng() * items.length);
   }
 
   // ── Active Set ──────────────────────────────────────────
@@ -685,11 +719,12 @@ new p5(function(p) {
 
   // ── Canvas Mode Overlay ─────────────────────────────────
   function drawModeOverlay() {
-    const modeLabel = inkRevealPhase          ? "REVEAL"     :
-                      mode === MODES.SOLVING  ? "SOLVING"    :
-                      mode === MODES.PLAYING  ? "PLAYING"    :
-                      maze.isDone()           ? "DONE"       : "GENERATING";
-    const speedStr  = (!maze.isDone() && displayedCPS > 0) ? `  ${displayedCPS}c/s` : "";
+    const modeLabel = activeWorker !== null    ? "WORKING"    :
+                      inkRevealPhase           ? "REVEAL"     :
+                      mode === MODES.SOLVING   ? "SOLVING"    :
+                      mode === MODES.PLAYING   ? "PLAYING"    :
+                      maze.isDone()            ? "DONE"       : "GENERATING";
+    const speedStr  = (!maze.isDone() && !activeWorker && displayedCPS > 0) ? `  ${displayedCPS}c/s` : "";
     const revealStr = inkRevealPhase ? `  ${wallQueueIdx}/${wallQueue.length}` : "";
     const label     = modeLabel + speedStr + revealStr;
 
@@ -707,7 +742,8 @@ new p5(function(p) {
     p.rect(bx - 2, 7, tw + 18, 20, 5);
     p.noStroke();
 
-    if      (inkRevealPhase)         p.fill("#6d28d9");
+    if      (activeWorker !== null)  p.fill("#7c3aed");  // worker running
+    else if (inkRevealPhase)         p.fill("#6d28d9");
     else if (mode === MODES.SOLVING) p.fill("#92400e");
     else if (mode === MODES.PLAYING) p.fill("#b91c1c");
     else if (maze.isDone())          p.fill("#15803d");
@@ -828,7 +864,7 @@ new p5(function(p) {
   function updateToggleStates() {
     const toggleMap = {
       toggleInstant:    instantMode,
-      toggleNoise:      useNoise,
+      toggleWorker:     useWorker,
       toggleHeat:       showDistances,
       toggleRegions:    showRegions,
       toggleFog:        showFog,
@@ -868,8 +904,13 @@ new p5(function(p) {
 
   function initToggleButtons() {
     const actions = {
-      toggleInstant:   () => { instantMode   = !instantMode;                      initMaze(); },
-      toggleNoise:     () => { useNoise      = !useNoise;                         initMaze(); },
+      toggleInstant:   () => { instantMode = !instantMode; initMaze(); },
+      toggleWorker:    () => {
+        useWorker = !useWorker;
+        // If turning off while a worker is running, abort it gracefully
+        if (!useWorker && activeWorker) { activeWorker.terminate(); activeWorker = null; }
+        updateToggleStates();
+      },
       toggleHeat:      () => { if (distanceMap) showDistances = !showDistances; updateToggleStates(); },
       toggleRegions:   () => { showRegions   = !showRegions;                     updateToggleStates(); },
       toggleFog:       () => { showFog       = !showFog;                         updateToggleStates(); },
@@ -986,6 +1027,117 @@ new p5(function(p) {
         initMaze();
       }
     });
+  }
+
+  // ── Web Worker ──────────────────────────────────────────
+  // Serialises the current mask, spins up a module Worker, and lets it
+  // run the maze to completion on a background thread.  When the worker
+  // posts back the result, we apply the packed cell data in-place and
+  // trigger the same post-generation steps as the synchronous path.
+  function runWithWorker() {
+    if (activeWorker) { activeWorker.terminate(); activeWorker = null; }
+
+    // Serialise mask as a flat Uint8Array (transferred zero-copy)
+    const mask2d   = PRESETS[presetIndex].build();
+    const maskFlat = new Uint8Array(COLS * ROWS);
+    for (let r = 0; r < ROWS; r++)
+      for (let c = 0; c < COLS; c++)
+        maskFlat[r * COLS + c] = mask2d[r][c] ? 1 : 0;
+
+    activeWorker = new Worker(
+      new URL('./worker/generatorWorker.js', import.meta.url),
+      { type: 'module' }
+    );
+
+    activeWorker.onmessage = ({ data: { buf } }) => {
+      applyWorkerResult(buf);
+      activeWorker = null;
+      computeDistanceMaps();
+      if (inkReveal) startInkReveal();
+      updateUI();
+    };
+
+    activeWorker.onerror = (err) => {
+      console.error('Generator worker error:', err.message);
+      activeWorker = null;
+      // Graceful fallback: finish synchronously on the main thread
+      maze.complete(randomPicker);
+      computeDistanceMaps();
+      if (inkReveal) startInkReveal();
+      updateUI();
+    };
+
+    // Transfer maskFlat.buffer (zero-copy) and send config to the worker
+    activeWorker.postMessage(
+      { cols: COLS, rows: ROWS, maskFlat, generatorType, seed: currentSeed },
+      [maskFlat.buffer]
+    );
+  }
+
+  // Unpacks the packed Int16Array sent by the worker and writes each
+  // cell's state, walls, and region back into maze.grid in-place.
+  // Format: 5 Int16 values per cell — [col, row, stateCode, wallBits, regionIndex]
+  //   stateCode : 0=OUT  1=IN  2=EXCLUDED
+  //   wallBits  : bit3=north  bit2=south  bit1=east  bit0=west  (1=wall present)
+  function applyWorkerResult(buf) {
+    const STATE_NAMES = ['out', 'in', 'excluded'];
+    for (let i = 0; i < buf.length; i += 5) {
+      const col    = buf[i];
+      const row    = buf[i + 1];
+      const code   = buf[i + 2];
+      const bits   = buf[i + 3];
+      const region = buf[i + 4];
+
+      const cell       = maze.grid.getCell(col, row);
+      cell.state       = STATE_NAMES[code] ?? 'out';
+      cell.walls.north = !!(bits & 8);
+      cell.walls.south = !!(bits & 4);
+      cell.walls.east  = !!(bits & 2);
+      cell.walls.west  = !!(bits & 1);
+      cell.regionIndex = region;
+    }
+    maze.done = true; // mark generator as complete
+  }
+
+  // ── Seed UI ─────────────────────────────────────────────
+  function updateSeedDisplay() {
+    const el = document.getElementById("seedDisplay");
+    if (el) el.textContent = currentSeed;
+    // Keep the input in sync unless the user has typed a custom value
+    const input = document.getElementById("seedInput");
+    if (input && !fixedSeed) input.value = currentSeed;
+  }
+
+  function initSeedInput() {
+    const input     = document.getElementById("seedInput");
+    const btnReseed = document.getElementById("btnReseed");
+
+    if (input) {
+      input.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") {
+          const v = parseInt(input.value, 10);
+          if (!isNaN(v)) {
+            currentSeed = v >>> 0; // force unsigned 32-bit
+            fixedSeed   = true;
+            initMaze();
+          }
+        }
+      });
+      // Clear fixedSeed flag when the user empties the field
+      input.addEventListener("input", () => {
+        if (input.value.trim() === "") fixedSeed = false;
+      });
+    }
+
+    if (btnReseed) {
+      btnReseed.addEventListener("click", () => {
+        fixedSeed = false;
+        if (input) input.value = "";
+        initMaze(); // picks a fresh random seed in initMaze()
+      });
+    }
+
+    updateSeedDisplay();
   }
 
 }); // end new p5

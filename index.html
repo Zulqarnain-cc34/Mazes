@@ -85,11 +85,11 @@
         <button class="toggle-btn" id="toggleInstant">
           <span class="kb">I</span> Instant
         </button>
-        <button class="toggle-btn" id="toggleNoise">
-          <span class="kb">N</span> Perlin Noise
-        </button>
         <button class="toggle-btn toggle-full" id="toggleInkReveal">
           <span class="kb">W</span> Ink Reveal — animate walls drawing in after generation
+        </button>
+        <button class="toggle-btn toggle-full" id="toggleWorker">
+          Background Worker — run instant-mode on a separate thread
         </button>
       </div>
       <div class="sec-title" style="margin-top:10px">
@@ -98,6 +98,23 @@
       </div>
       <input type="range" id="speed" min="1" max="20" value="1" />
       <div class="slider-labels"><span>1 — step by step</span><span>20 — fast</span></div>
+    </div>
+
+    <!-- Seed -->
+    <div class="section">
+      <div class="sec-title">
+        Seed
+        <span class="val" id="seedDisplay">—</span>
+      </div>
+      <div style="display:flex;gap:6px;align-items:center;margin-bottom:4px">
+        <input type="number" id="seedInput" placeholder="type a seed and press Enter…"
+               style="flex:1;padding:5px 8px;border:1px solid var(--border-2);border-radius:var(--r);
+                      font-size:11px;font-family:monospace;background:var(--bg);color:var(--text);
+                      outline:none;min-width:0" />
+        <button id="btnReseed" class="toggle-btn" style="padding:5px 10px;font-size:15px;min-width:36px"
+                title="New random seed">🎲</button>
+      </div>
+      <p class="sec-note">Same seed + same settings → same maze. Share seeds to reproduce results.</p>
     </div>
 
     <!-- Image Mask -->
@@ -175,7 +192,6 @@
           <kbd>← →</kbd>   <span class="kd">Cycle shapes</span>
           <kbd>D</kbd>      <span class="kd">Distance heat map</span>
           <kbd>G</kbd>      <span class="kd">Region colors</span>
-          <kbd>N</kbd>      <span class="kd">Perlin noise</span>
           <kbd>I</kbd>      <span class="kd">Instant mode</span>
           <kbd>F</kbd>      <span class="kd">Fog of war</span>
           <kbd>E</kbd>      <span class="kd">Export PNG</span>
