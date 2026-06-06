@@ -4,440 +4,7 @@
   <meta charset="utf-8" />
   <title>Maze Generator</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <style>
-    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-
-    :root {
-      --bg:        #f2f2f5;
-      --sidebar:   #ffffff;
-      --card:      #f7f7f9;
-      --border:    #e4e4e8;
-      --border-2:  #d0d0d8;
-      --text:      #111111;
-      --muted:     #7a7a8c;
-      --blue:      #2563eb;
-      --blue-bg:   #eff6ff;
-      --blue-mid:  #bfdbfe;
-      --green:     #16a34a;
-      --green-bg:  #f0fdf4;
-      --amber:     #92400e;
-      --amber-bg:  #fffbeb;
-      --amber-mid: #fde68a;
-      --red:       #b91c1c;
-      --red-bg:    #fef2f2;
-      --r:         7px;
-    }
-
-    html, body { height: 100%; }
-
-    body {
-      background: var(--bg);
-      color: var(--text);
-      font-family: -apple-system, "Segoe UI", system-ui, sans-serif;
-      font-size: 13px;
-      line-height: 1.5;
-      display: flex;
-      min-height: 100vh;
-    }
-
-    /* ── Layout ─────────────────────────────────────── */
-    .layout {
-      display: flex;
-      width: 100%;
-      min-height: 100vh;
-    }
-
-    /* ── Sidebar ─────────────────────────────────────── */
-    .sidebar {
-      width: 264px;
-      min-width: 264px;
-      background: var(--sidebar);
-      border-right: 1px solid var(--border);
-      display: flex;
-      flex-direction: column;
-      overflow-y: auto;
-      scrollbar-width: thin;
-      scrollbar-color: var(--border) transparent;
-    }
-    .sidebar::-webkit-scrollbar       { width: 4px; }
-    .sidebar::-webkit-scrollbar-track { background: transparent; }
-    .sidebar::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
-
-    /* ── Header ──────────────────────────────────────── */
-    .sb-header {
-      padding: 16px 16px 14px;
-      border-bottom: 1px solid var(--border);
-      display: flex;
-      align-items: center;
-      gap: 10px;
-    }
-
-    .logo {
-      width: 32px;
-      height: 32px;
-      background: var(--text);
-      border-radius: 8px;
-      display: grid;
-      place-items: center;
-      font-size: 16px;
-      color: var(--sidebar);
-      flex-shrink: 0;
-    }
-
-    .sb-title   { font-size: 14px; font-weight: 700; letter-spacing: -0.01em; }
-    .sb-tagline { font-size: 11px; color: var(--muted); }
-
-    /* ── Status bar ──────────────────────────────────── */
-    .status-bar {
-      display: flex;
-      align-items: center;
-      gap: 7px;
-      padding: 8px 14px;
-      background: var(--card);
-      border-bottom: 1px solid var(--border);
-    }
-
-    .mode-badge {
-      padding: 2px 8px;
-      border-radius: 20px;
-      font-size: 10px;
-      font-weight: 700;
-      letter-spacing: 0.07em;
-      text-transform: uppercase;
-      font-family: monospace;
-    }
-    .mode-badge.generating { background: var(--blue-bg);  color: var(--blue); }
-    .mode-badge.done       { background: var(--green-bg); color: var(--green); }
-    .mode-badge.solving    { background: var(--amber-bg); color: var(--amber); }
-    .mode-badge.playing    { background: var(--red-bg);   color: var(--red); }
-
-    #statusAlgo, #statusSpeed {
-      font-size: 11px;
-      color: var(--muted);
-      font-family: monospace;
-    }
-
-    /* ── Sections ────────────────────────────────────── */
-    .section {
-      padding: 13px 14px;
-      border-bottom: 1px solid var(--border);
-    }
-
-    .sec-title {
-      font-size: 10px;
-      font-weight: 700;
-      letter-spacing: 0.09em;
-      text-transform: uppercase;
-      color: var(--muted);
-      margin-bottom: 9px;
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-    }
-    .sec-title .hint { font-weight: 400; letter-spacing: 0; text-transform: none; opacity: 0.8; }
-    .sec-title .val  { font-family: monospace; color: var(--blue); letter-spacing: 0; text-transform: none; font-weight: 600; }
-
-    .sec-note {
-      font-size: 11px;
-      color: var(--muted);
-      margin-top: 8px;
-      line-height: 1.55;
-    }
-
-    /* ── Select ──────────────────────────────────────── */
-    select {
-      width: 100%;
-      padding: 7px 28px 7px 9px;
-      background: var(--sidebar);
-      border: 1px solid var(--border-2);
-      border-radius: var(--r);
-      color: var(--text);
-      font-size: 12px;
-      cursor: pointer;
-      outline: none;
-      appearance: none;
-      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath fill='%237a7a8c' d='M5 6L0 0h10z'/%3E%3C/svg%3E");
-      background-repeat: no-repeat;
-      background-position: right 10px center;
-    }
-    select:focus { border-color: var(--blue); box-shadow: 0 0 0 3px rgba(37,99,235,0.08); }
-
-    /* ── Shape buttons ───────────────────────────────── */
-    .shape-grid {
-      display: grid;
-      grid-template-columns: repeat(3, 1fr);
-      gap: 5px;
-    }
-
-    .shape-btn {
-      padding: 6px 4px;
-      background: var(--sidebar);
-      border: 1px solid var(--border);
-      border-radius: var(--r);
-      color: var(--muted);
-      font-size: 11px;
-      cursor: pointer;
-      text-align: center;
-      transition: border-color 0.1s, color 0.1s, background 0.1s;
-      font-family: inherit;
-    }
-    .shape-btn:hover  { border-color: var(--blue-mid); color: var(--text); }
-    .shape-btn.active {
-      background: var(--blue-bg);
-      border-color: var(--blue-mid);
-      color: var(--blue);
-      font-weight: 600;
-    }
-
-    /* ── Slider ──────────────────────────────────────── */
-    input[type="range"] {
-      width: 100%;
-      height: 4px;
-      -webkit-appearance: none;
-      background: var(--border);
-      border-radius: 2px;
-      outline: none;
-      cursor: pointer;
-    }
-    input[type="range"]::-webkit-slider-thumb {
-      -webkit-appearance: none;
-      width: 14px; height: 14px;
-      border-radius: 50%;
-      background: var(--blue);
-      cursor: pointer;
-      border: 2px solid #fff;
-      box-shadow: 0 0 0 1px var(--blue-mid), 0 1px 3px rgba(0,0,0,0.12);
-    }
-    input[type="range"]::-moz-range-thumb {
-      width: 14px; height: 14px;
-      border-radius: 50%;
-      background: var(--blue);
-      border: 2px solid #fff;
-      cursor: pointer;
-    }
-    .slider-labels {
-      display: flex;
-      justify-content: space-between;
-      font-size: 10px;
-      color: var(--muted);
-      margin-top: 4px;
-    }
-
-    /* ── Param row (label + slider + value) ─────────── */
-    .param-row {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      margin-top: 9px;
-    }
-    .param-label { font-size: 11px; color: var(--muted); min-width: 64px; }
-    .param-val   { font-family: monospace; font-size: 11px; color: var(--blue); min-width: 28px; text-align: right; font-weight: 600; }
-
-    /* ── Toggle buttons ──────────────────────────────── */
-    .toggle-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 5px; }
-    .toggle-full { grid-column: span 2; }
-
-    .toggle-btn {
-      display: flex;
-      align-items: center;
-      gap: 6px;
-      padding: 6px 9px;
-      background: var(--sidebar);
-      border: 1px solid var(--border);
-      border-radius: var(--r);
-      color: var(--muted);
-      font-size: 11px;
-      cursor: pointer;
-      transition: border-color 0.1s, color 0.1s, background 0.1s;
-      font-family: inherit;
-    }
-    .toggle-btn:hover  { border-color: var(--blue-mid); color: var(--text); }
-    .toggle-btn.active {
-      background: var(--blue-bg);
-      border-color: var(--blue-mid);
-      color: var(--blue);
-      font-weight: 600;
-    }
-    .toggle-btn.active .kb { background: var(--blue); color: #fff; border-color: var(--blue); }
-
-    /* ── Keyboard badge ──────────────────────────────── */
-    .kb {
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      min-width: 18px; height: 18px;
-      padding: 0 3px;
-      background: var(--card);
-      border: 1px solid var(--border-2);
-      border-radius: 4px;
-      font-family: monospace;
-      font-size: 10px;
-      color: var(--text);
-      flex-shrink: 0;
-    }
-
-    /* ── Upload ──────────────────────────────────────── */
-    .upload-btn {
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      gap: 8px;
-      width: 100%;
-      padding: 9px;
-      background: var(--sidebar);
-      border: 1.5px dashed var(--border-2);
-      border-radius: var(--r);
-      color: var(--muted);
-      font-size: 12px;
-      cursor: pointer;
-      transition: border-color 0.1s, color 0.1s;
-    }
-    .upload-btn:hover { border-color: var(--blue); color: var(--blue); }
-    input[type="file"] { display: none; }
-
-    /* ── Action buttons ──────────────────────────────── */
-    .action-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 5px; margin-bottom: 7px; }
-
-    .action-btn {
-      display: flex; align-items: center; justify-content: center;
-      gap: 6px; padding: 8px;
-      border-radius: var(--r);
-      font-size: 12px; font-weight: 600;
-      cursor: pointer;
-      transition: all 0.1s;
-      font-family: inherit;
-    }
-
-    .solve-btn {
-      background: var(--amber-bg);
-      border: 1px solid var(--amber-mid);
-      color: var(--amber);
-    }
-    .solve-btn:hover  { background: #fde68a; border-color: #f59e0b; }
-    .solve-btn.active { background: #f59e0b; border-color: #f59e0b; color: #fff; }
-    .solve-btn .kb    { background: var(--amber-bg); border-color: var(--amber-mid); color: var(--amber); }
-    .solve-btn.active .kb { background: rgba(255,255,255,0.25); border-color: transparent; color: #fff; }
-
-    .play-btn {
-      background: var(--green-bg);
-      border: 1px solid #bbf7d0;
-      color: var(--green);
-    }
-    .play-btn:hover  { background: #bbf7d0; border-color: #4ade80; }
-    .play-btn.active { background: #22c55e; border-color: #22c55e; color: #fff; }
-    .play-btn .kb    { background: var(--green-bg); border-color: #bbf7d0; color: var(--green); }
-    .play-btn.active .kb { background: rgba(255,255,255,0.25); border-color: transparent; color: #fff; }
-
-    /* ── Export ──────────────────────────────────────── */
-    .export-btn {
-      display: flex; align-items: center; justify-content: center;
-      gap: 8px; width: 100%; padding: 9px;
-      background: var(--blue-bg);
-      border: 1px solid var(--blue-mid);
-      border-radius: var(--r);
-      color: var(--blue);
-      font-size: 12px; font-weight: 600;
-      cursor: pointer;
-      transition: background 0.1s;
-      font-family: inherit;
-    }
-    .export-btn:hover { background: #dbeafe; }
-    .export-btn .kb   { background: var(--blue); border-color: var(--blue); color: #fff; }
-
-    /* ── Keyboard shortcuts (collapsible) ────────────── */
-    .shortcuts-details { border-bottom: 1px solid var(--border); }
-
-    .shortcuts-summary {
-      list-style: none;
-      cursor: pointer;
-      user-select: none;
-      padding: 13px 14px;
-      font-size: 10px;
-      font-weight: 700;
-      letter-spacing: 0.09em;
-      text-transform: uppercase;
-      color: var(--muted);
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      transition: color 0.1s;
-    }
-    .shortcuts-summary::-webkit-details-marker { display: none; }
-    .shortcuts-summary:hover { color: var(--text); }
-
-    .shortcuts-summary .arrow {
-      font-size: 14px;
-      line-height: 1;
-      transition: transform 0.2s ease;
-      font-weight: 400;
-      letter-spacing: 0;
-    }
-    .shortcuts-details[open] .arrow { transform: rotate(90deg); }
-
-    .shortcuts-body { padding: 0 14px 13px; }
-
-    .kbref {
-      display: grid;
-      grid-template-columns: auto 1fr;
-      gap: 5px 10px;
-      font-size: 11px;
-    }
-
-    .kbref kbd {
-      display: inline-flex; align-items: center; justify-content: center;
-      min-width: 28px; height: 20px; padding: 0 5px;
-      background: var(--card);
-      border: 1px solid var(--border-2);
-      border-radius: 4px;
-      font-family: monospace; font-size: 10px;
-      color: var(--text);
-    }
-    .kbref .kd { color: var(--muted); line-height: 20px; }
-
-    .mouse-tip {
-      display: flex; gap: 10px; align-items: flex-start;
-      margin-top: 10px; padding: 9px 10px;
-      background: var(--card);
-      border: 1px solid var(--border);
-      border-radius: var(--r);
-      font-size: 11px; color: var(--muted); line-height: 1.55;
-    }
-    .mouse-tip .ico { font-size: 16px; flex-shrink: 0; margin-top: 1px; }
-
-    /* ── Canvas area ─────────────────────────────────── */
-    .canvas-area {
-      flex: 1;
-      display: flex; flex-direction: column; align-items: center; justify-content: center;
-      padding: 32px 24px; gap: 14px;
-    }
-
-    #canvas-container canvas {
-      display: block;
-      border: 1px solid var(--border);
-      border-radius: 4px;
-      box-shadow: 0 2px 8px rgba(0,0,0,0.06), 0 12px 32px rgba(0,0,0,0.07);
-    }
-
-    .canvas-footer {
-      display: flex; align-items: center; gap: 14px;
-      flex-wrap: wrap; justify-content: center;
-    }
-
-    .canvas-meta {
-      font-family: monospace; font-size: 11px; color: var(--muted);
-    }
-
-    .click-guide {
-      display: flex; align-items: center; gap: 7px;
-      padding: 5px 13px;
-      background: var(--sidebar);
-      border: 1px solid var(--border);
-      border-radius: 20px;
-      font-size: 11px; color: var(--muted);
-    }
-    .click-guide .sep { color: var(--border-2); }
-    .dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
-  </style>
+  <link rel="stylesheet" href="css/style.css" />
 </head>
 <body>
 <div class="layout">
@@ -449,7 +16,7 @@
       <div class="logo">⬡</div>
       <div>
         <div class="sb-title">Maze Generator</div>
-        <div class="sb-tagline">Prim's · DFS · BFS Solver</div>
+        <div class="sb-tagline">7 generators · 4 solvers</div>
       </div>
     </div>
 
@@ -460,12 +27,28 @@
       <span id="statusSpeed"></span>
     </div>
 
-    <!-- Algorithm -->
+    <!-- Generator -->
     <div class="section">
-      <div class="sec-title">Algorithm</div>
+      <div class="sec-title">Generator</div>
       <select id="algorithm">
-        <option value="prims">Prim's  —  random branching</option>
-        <option value="dfs">DFS  —  long winding corridors</option>
+        <option value="prims">Prim's — random branching</option>
+        <option value="dfs">DFS — long winding corridors</option>
+        <option value="aldous">Aldous-Broder — fully unbiased (slow)</option>
+        <option value="wilsons">Wilson's — loop-erased walk</option>
+        <option value="kruskal">Kruskal's — random wall removal</option>
+        <option value="binarytree">Binary Tree — NE diagonal bias</option>
+        <option value="sidewinder">Sidewinder — horizontal runs</option>
+      </select>
+    </div>
+
+    <!-- Solver -->
+    <div class="section">
+      <div class="sec-title">Solver</div>
+      <select id="solver">
+        <option value="bfs">BFS — shortest path</option>
+        <option value="astar">A* — aims toward end</option>
+        <option value="deadend">Dead-end fill — elimination</option>
+        <option value="wallfollower">Wall follower — right-hand rule</option>
       </select>
     </div>
 
@@ -506,7 +89,12 @@
           <span class="kb">N</span> Perlin Noise
         </button>
       </div>
-      <p class="sec-note">Noise biases passage direction — hold R to see the difference quickly.</p>
+      <div class="sec-title" style="margin-top:10px">
+        Speed
+        <span class="val" id="speedValue">1× (default)</span>
+      </div>
+      <input type="range" id="speed" min="1" max="20" value="1" />
+      <div class="slider-labels"><span>1 — step by step</span><span>20 — fast</span></div>
     </div>
 
     <!-- Image Mask -->
@@ -559,9 +147,14 @@
 
     <!-- Export -->
     <div class="section">
-      <button class="export-btn" id="btnExport">
-        <span class="kb">E</span> Save as PNG
-      </button>
+      <div class="action-grid">
+        <button class="export-btn" id="btnExport">
+          <span class="kb">E</span> PNG
+        </button>
+        <button class="export-btn" id="btnExportSVG">
+          <span class="kb">V</span> SVG
+        </button>
+      </div>
     </div>
 
     <!-- Keyboard shortcuts (collapsible) -->
@@ -583,6 +176,7 @@
           <kbd>I</kbd>      <span class="kd">Instant mode</span>
           <kbd>F</kbd>      <span class="kd">Fog of war</span>
           <kbd>E</kbd>      <span class="kd">Export PNG</span>
+          <kbd>V</kbd>      <span class="kd">Export SVG</span>
           <kbd>↑↓←→</kbd>  <span class="kd">Move player (Play mode)</span>
         </div>
         <div class="mouse-tip">
@@ -618,7 +212,6 @@
 
 </div>
 <script src="https://cdn.jsdelivr.net/npm/p5@1/lib/p5.min.js"></script>
-<script src="board.js"></script>
-<script src="sketch.js"></script>
+<script type="module" src="js/sketch.js"></script>
 </body>
 </html>
