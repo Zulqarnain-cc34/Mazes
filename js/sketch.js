@@ -107,6 +107,15 @@ let showDistances = false;
 let showRegions   = false;
 let showFog       = false;
 
+// ─── Ink Reveal State ────────────────────────────────────
+// When inkReveal is on, the finished maze draws itself wall by
+// wall onto an offscreen graphics buffer — like ink on paper.
+let inkReveal      = false;  // feature toggle (persists across restarts)
+let inkRevealPhase = false;  // true while the reveal animation is running
+let wallQueue      = [];     // [{x1,y1,x2,y2}] all wall segments, shuffled
+let wallQueueIdx   = 0;      // index of the next segment to draw
+let wallBuffer     = null;   // p.Graphics accumulator
+
 let maze        = null;
 let frontierSet = new Set();
 let distanceMap = null;
@@ -167,6 +176,7 @@ new p5(function(p) {
         if (cpsFrameCount % 20 === 0) displayedCPS = maze.cellsPerSecond;
       } else if (!distanceMap) {
         computeDistanceMaps();
+        if (inkReveal) startInkReveal();
       }
     }
 
@@ -181,7 +191,7 @@ new p5(function(p) {
       }
     }
 
-    drawGrid();
+    if (inkRevealPhase) drawInkReveal(); else drawGrid();
     drawModeOverlay();
     if (mode === MODES.PLAYING) drawPlayHUD();
     if (mode === MODES.PLAYING && playWon) drawWinOverlay();
@@ -292,6 +302,17 @@ new p5(function(p) {
     if (p.key === "g" || p.key === "G") { showRegions = !showRegions; updateToggleStates(); }
     if (p.key === "f" || p.key === "F") { showFog     = !showFog;     updateToggleStates(); }
 
+    if (p.key === "w" || p.key === "W") {
+      inkReveal = !inkReveal;
+      if (inkReveal && maze.isDone() && !inkRevealPhase) {
+        // Replay reveal on the current finished maze
+        startInkReveal();
+      } else if (!inkReveal) {
+        inkRevealPhase = false;
+      }
+      updateToggleStates();
+    }
+
     if (p.key === "s" || p.key === "S") {
       if (mode === MODES.GENERATING && maze.isDone()) {
         startSolving();
@@ -312,29 +333,34 @@ new p5(function(p) {
     const factory = GENERATOR_MAP[generatorType] ?? GENERATOR_MAP.prims;
     maze = factory(grid);
 
-    frontierSet   = new Set();
-    distanceMap   = null;
-    regionDMs     = new Map();
-    solver        = null;
-    pathStep      = 0;
-    startCell     = null;
-    endCell       = null;
-    clickPhase    = 0;
-    playerCell    = null;
-    revealedSet   = new Set();
-    playStepCount = 0;
-    playStartTime = null;
-    playWon       = false;
-    mode          = MODES.GENERATING;
-    cpsFrameCount = 0;
-    displayedCPS  = 0;
+    frontierSet    = new Set();
+    distanceMap    = null;
+    regionDMs      = new Map();
+    solver         = null;
+    pathStep       = 0;
+    startCell      = null;
+    endCell        = null;
+    clickPhase     = 0;
+    playerCell     = null;
+    revealedSet    = new Set();
+    playStepCount  = 0;
+    playStartTime  = null;
+    playWon        = false;
+    mode           = MODES.GENERATING;
+    cpsFrameCount  = 0;
+    displayedCPS   = 0;
     stepAccumulator = 0;
+    inkRevealPhase = false;
+    wallQueue      = [];
+    wallQueueIdx   = 0;
+    if (wallBuffer) { wallBuffer.remove(); wallBuffer = null; }
 
     maze.init();
 
     if (instantMode) {
       maze.complete(useNoise ? noisePicker : randomPicker);
       computeDistanceMaps();
+      if (inkReveal) startInkReveal();
     }
 
     updateUI();
@@ -361,9 +387,15 @@ new p5(function(p) {
     playWon       = false;
     mode          = MODES.GENERATING;
 
+    inkRevealPhase = false;
+    wallQueue      = [];
+    wallQueueIdx   = 0;
+    if (wallBuffer) { wallBuffer.remove(); wallBuffer = null; }
+
     maze.init();
     maze.complete(useNoise ? noisePicker : randomPicker);
     computeDistanceMaps();
+    if (inkReveal) startInkReveal();
     updateUI();
   }
 
@@ -451,6 +483,101 @@ new p5(function(p) {
     }
   }
 
+  // ── Ink Reveal ──────────────────────────────────────────
+  // Creates an offscreen graphics buffer and populates the wall
+  // segment queue with every wall in the finished maze, shuffled
+  // so they draw in a random, organic order.
+  function startInkReveal() {
+    if (wallBuffer) wallBuffer.remove();
+    wallBuffer = p.createGraphics(p.width, p.height);
+    wallBuffer.background(255);           // white paper base
+    wallBuffer.strokeCap(p.SQUARE);
+    wallBuffer.noFill();
+
+    wallQueue    = buildWallSegments();
+    wallQueueIdx = 0;
+    inkRevealPhase = true;
+  }
+
+  // Collects every wall line segment in the maze exactly once,
+  // then Fisher-Yates shuffles for a random draw order.
+  // Same "draw each wall once" logic as SVG export to avoid double lines.
+  function buildWallSegments() {
+    const segs = [];
+    const sw   = CELL_SIZE >= 8 ? 1.5 : 1;
+
+    for (let row = 0; row < maze.grid.rows; row++) {
+      for (let col = 0; col < maze.grid.cols; col++) {
+        const cell = maze.grid.getCell(col, row);
+        if (cell.isExcluded()) continue;
+
+        const x = col * CELL_SIZE;
+        const y = row * CELL_SIZE;
+        const s = CELL_SIZE;
+
+        if (row === 0 && cell.walls.north) segs.push({ x1: x,   y1: y,   x2: x+s, y2: y,   sw });
+        if (col === 0 && cell.walls.west)  segs.push({ x1: x,   y1: y,   x2: x,   y2: y+s, sw });
+        if (cell.walls.south)              segs.push({ x1: x,   y1: y+s, x2: x+s, y2: y+s, sw });
+        if (cell.walls.east)               segs.push({ x1: x+s, y1: y,   x2: x+s, y2: y+s, sw });
+      }
+    }
+
+    // Fisher-Yates shuffle — organic random draw order
+    for (let i = segs.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [segs[i], segs[j]] = [segs[j], segs[i]];
+    }
+
+    return segs;
+  }
+
+  // Called each frame instead of drawGrid() while inkRevealPhase is true.
+  // Draws a batch of wall segments to the offscreen buffer, then blits
+  // the buffer to the main canvas. Overlays (start/end pins, mode pill)
+  // are drawn on top of the blit by the normal code path.
+  function drawInkReveal() {
+    // Paper-white background for the ink aesthetic
+    p.background("#faf9f6");
+
+    // Advance the queue: more segments per frame at higher speed settings
+    const segPerFrame = Math.max(1, Math.round(stepsPerFrame * 8));
+    wallBuffer.stroke(COLOR_WALL);
+
+    for (let i = 0; i < segPerFrame && wallQueueIdx < wallQueue.length; i++) {
+      const { x1, y1, x2, y2, sw } = wallQueue[wallQueueIdx++];
+      wallBuffer.strokeWeight(sw);
+      wallBuffer.line(x1, y1, x2, y2);
+    }
+
+    // Blit accumulated lines onto the main canvas
+    p.image(wallBuffer, 0, 0);
+
+    // Draw start / end pins on top so they remain visible during reveal
+    if (startCell) {
+      p.noStroke();
+      p.fill(COLOR_START);
+      const r = Math.max(3, CELL_SIZE * 0.3);
+      p.ellipse(
+        startCell.col * CELL_SIZE + CELL_SIZE / 2,
+        startCell.row * CELL_SIZE + CELL_SIZE / 2,
+        r * 2
+      );
+    }
+    if (endCell) {
+      p.noStroke();
+      p.fill(COLOR_END);
+      const r = Math.max(3, CELL_SIZE * 0.3);
+      p.ellipse(
+        endCell.col * CELL_SIZE + CELL_SIZE / 2,
+        endCell.row * CELL_SIZE + CELL_SIZE / 2,
+        r * 2
+      );
+    }
+
+    // Finish reveal phase once all segments are drawn
+    if (wallQueueIdx >= wallQueue.length) inkRevealPhase = false;
+  }
+
   // ── Rendering ───────────────────────────────────────────
   function drawGrid() {
     for (let row = 0; row < maze.grid.rows; row++) {
@@ -459,6 +586,7 @@ new p5(function(p) {
       }
     }
   }
+
 
   function drawCell(cell) {
     const x = cell.col * CELL_SIZE;
@@ -557,11 +685,13 @@ new p5(function(p) {
 
   // ── Canvas Mode Overlay ─────────────────────────────────
   function drawModeOverlay() {
-    const modeLabel = mode === MODES.SOLVING ? "SOLVING" :
-                      mode === MODES.PLAYING  ? "PLAYING"  :
-                      maze.isDone()           ? "DONE"     : "GENERATING";
+    const modeLabel = inkRevealPhase          ? "REVEAL"     :
+                      mode === MODES.SOLVING  ? "SOLVING"    :
+                      mode === MODES.PLAYING  ? "PLAYING"    :
+                      maze.isDone()           ? "DONE"       : "GENERATING";
     const speedStr  = (!maze.isDone() && displayedCPS > 0) ? `  ${displayedCPS}c/s` : "";
-    const label     = modeLabel + speedStr;
+    const revealStr = inkRevealPhase ? `  ${wallQueueIdx}/${wallQueue.length}` : "";
+    const label     = modeLabel + speedStr + revealStr;
 
     p.textFont("monospace");
     p.textSize(11);
@@ -577,7 +707,8 @@ new p5(function(p) {
     p.rect(bx - 2, 7, tw + 18, 20, 5);
     p.noStroke();
 
-    if      (mode === MODES.SOLVING) p.fill("#92400e");
+    if      (inkRevealPhase)         p.fill("#6d28d9");
+    else if (mode === MODES.SOLVING) p.fill("#92400e");
     else if (mode === MODES.PLAYING) p.fill("#b91c1c");
     else if (maze.isDone())          p.fill("#15803d");
     else                             p.fill("#2563eb");
@@ -696,11 +827,12 @@ new p5(function(p) {
 
   function updateToggleStates() {
     const toggleMap = {
-      toggleInstant: instantMode,
-      toggleNoise:   useNoise,
-      toggleHeat:    showDistances,
-      toggleRegions: showRegions,
-      toggleFog:     showFog,
+      toggleInstant:    instantMode,
+      toggleNoise:      useNoise,
+      toggleHeat:       showDistances,
+      toggleRegions:    showRegions,
+      toggleFog:        showFog,
+      toggleInkReveal:  inkReveal,
     };
     for (const [id, active] of Object.entries(toggleMap)) {
       const btn = document.getElementById(id);
@@ -736,11 +868,17 @@ new p5(function(p) {
 
   function initToggleButtons() {
     const actions = {
-      toggleInstant: () => { instantMode   = !instantMode;                      initMaze(); },
-      toggleNoise:   () => { useNoise      = !useNoise;                         initMaze(); },
-      toggleHeat:    () => { if (distanceMap) showDistances = !showDistances; updateToggleStates(); },
-      toggleRegions: () => { showRegions   = !showRegions;                     updateToggleStates(); },
-      toggleFog:     () => { showFog       = !showFog;                         updateToggleStates(); },
+      toggleInstant:   () => { instantMode   = !instantMode;                      initMaze(); },
+      toggleNoise:     () => { useNoise      = !useNoise;                         initMaze(); },
+      toggleHeat:      () => { if (distanceMap) showDistances = !showDistances; updateToggleStates(); },
+      toggleRegions:   () => { showRegions   = !showRegions;                     updateToggleStates(); },
+      toggleFog:       () => { showFog       = !showFog;                         updateToggleStates(); },
+      toggleInkReveal: () => {
+        inkReveal = !inkReveal;
+        if (inkReveal && maze.isDone() && !inkRevealPhase) startInkReveal();
+        else if (!inkReveal) inkRevealPhase = false;
+        updateToggleStates();
+      },
     };
     for (const [id, fn] of Object.entries(actions)) {
       document.getElementById(id)?.addEventListener("click", fn);
