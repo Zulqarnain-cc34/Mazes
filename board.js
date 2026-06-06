@@ -170,6 +170,22 @@ class MazeGrid {
     return null;
   }
 
+  // Returns all neighbors of a cell that are reachable through open passages.
+  // A passage is open when the wall flag in that direction is false.
+  // This is the shared entry point for any traversal algorithm (BFS, A*, DFS, etc.)
+  getPassableNeighbors(col, row) {
+    const cell      = this.getCell(col, row);
+    const passable  = [];
+
+    for (const { direction, cell: neighbor } of this.getNeighbors(col, row)) {
+      if (!cell.walls[direction]) {
+        passable.push(neighbor);
+      }
+    }
+
+    return passable;
+  }
+
   // Resets all cells back to their initial state (all walls on, all out).
   // Used when restarting the maze generation.
   reset() {
@@ -236,18 +252,19 @@ class PrimsMaze {
   }
 
   // Runs one iteration of Prim's algorithm.
-  // Picks a random frontier entry, checks if the outCell is still out,
-  // and if so opens the wall and expands the frontier.
-  step() {
+  // pickIndex is an optional function that receives the current frontier array
+  // and returns the index of the entry to process next.
+  // Defaults to pure random selection.
+  // Swap it out for any scoring function (e.g. Perlin noise) without touching this class.
+  step(pickIndex = (frontier) => Math.floor(Math.random() * frontier.length)) {
     if (this.done) {
       return;
     }
 
     // Drain stale entries where outCell is already in.
-    // We pick a random index, swap-remove it for O(1) removal,
-    // and check if the outCell is still out.
+    // We delegate index selection to pickIndex, then swap-remove for O(1) removal.
     while (this.frontier.length > 0) {
-      const index = Math.floor(Math.random() * this.frontier.length);
+      const index = pickIndex(this.frontier);
       const entry = this.removeAtIndex(index);
 
       if (entry.outCell.isIn()) {
@@ -268,6 +285,14 @@ class PrimsMaze {
   // Returns true when maze generation is complete.
   isDone() {
     return this.done;
+  }
+
+  // Runs all remaining steps instantly, completing the maze in one call.
+  // Used when the user wants to skip the animation.
+  complete(pickIndex = (frontier) => Math.floor(Math.random() * frontier.length)) {
+    while (!this.done) {
+      this.step(pickIndex);
+    }
   }
 
   // Marks a cell as in, records it as the last added cell,
@@ -294,5 +319,99 @@ class PrimsMaze {
     this.frontier[index]         = this.frontier[this.frontier.length - 1];
     this.frontier.length        -= 1;
     return entry;
+  }
+}
+
+// ─────────────────────────────────────────────
+// BFSTraverser
+// Traversal strategy that computes the shortest
+// distance from a start cell to every reachable
+// cell using Breadth-First Search.
+//
+// Returns a Map<Cell, distance> where distance
+// is the number of passages walked to reach it.
+//
+// To add a new algorithm (A*, DFS, Dijkstra),
+// create a new class with the same traverse()
+// signature and pass it to DistanceMap.
+// ─────────────────────────────────────────────
+
+class BFSTraverser {
+  // Walks the maze from startCell using BFS.
+  // Only follows open passages (walls that are false).
+  // Returns Map<Cell, distance>.
+  traverse(grid, startCell) {
+    const distances = new Map();
+    const queue     = [startCell];
+    distances.set(startCell, 0);
+
+    while (queue.length > 0) {
+      const current     = queue.shift();
+      const currentDist = distances.get(current);
+
+      for (const neighbor of grid.getPassableNeighbors(current.col, current.row)) {
+        if (!distances.has(neighbor)) {
+          distances.set(neighbor, currentDist + 1);
+          queue.push(neighbor);
+        }
+      }
+    }
+
+    return distances;
+  }
+}
+
+// ─────────────────────────────────────────────
+// DistanceMap
+// Computes and stores distances from a start
+// cell to every reachable cell in the maze.
+//
+// The traversal strategy is injected — pass any
+// object with a traverse(grid, startCell) method.
+// Default is BFSTraverser.
+// ─────────────────────────────────────────────
+
+class DistanceMap {
+  constructor(grid, traverser = new BFSTraverser()) {
+    if (!(grid instanceof MazeGrid)) {
+      throw new TypeError("DistanceMap requires a MazeGrid.");
+    }
+
+    this.grid        = grid;
+    this.traverser   = traverser;
+    this.distances   = new Map();  // Cell → distance (integer)
+    this.maxDistance = 0;
+  }
+
+  // Delegates traversal to the injected strategy and stores the result.
+  compute(startCol, startRow) {
+    this.distances   = new Map();
+    this.maxDistance = 0;
+
+    const startCell  = this.grid.getCell(startCol, startRow);
+    this.distances   = this.traverser.traverse(this.grid, startCell);
+
+    for (const dist of this.distances.values()) {
+      if (dist > this.maxDistance) {
+        this.maxDistance = dist;
+      }
+    }
+  }
+
+  // Returns the distance of a cell from the start, or -1 if not reached.
+  getDistance(cell) {
+    return this.distances.has(cell) ? this.distances.get(cell) : -1;
+  }
+
+  // Returns a 0.0–1.0 value representing how far this cell is
+  // relative to the farthest cell. Used for color interpolation.
+  getNormalized(cell) {
+    const dist = this.getDistance(cell);
+
+    if (dist < 0 || this.maxDistance === 0) {
+      return 0;
+    }
+
+    return dist / this.maxDistance;
   }
 }
