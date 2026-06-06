@@ -12,6 +12,7 @@ import MazeSolver from './MazeSolver.js';
 export default class DeadEndFillSolver extends MazeSolver {
   constructor(grid) {
     super(grid);
+    this.solverType        = "deadend";
     this.showVisitedAlways = true; // filled cells stay visible after solution is found
     this._filledSet        = new Set();
     this._queue            = [];

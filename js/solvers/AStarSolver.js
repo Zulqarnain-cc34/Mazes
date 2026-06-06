@@ -7,7 +7,8 @@ import MazeSolver from './MazeSolver.js';
 export default class AStarSolver extends MazeSolver {
   constructor(grid) {
     super(grid);
-    this._openList = [];       // unsorted array used as a priority queue
+    this.solverType = "astar";
+    this._openList  = [];      // unsorted array used as a priority queue
     this._inOpen   = new Set();
     this._gScore   = new Map();
     this._fScore   = new Map();

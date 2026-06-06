@@ -12,6 +12,7 @@ import MazeSolver from './MazeSolver.js';
 export default class WallFollowerSolver extends MazeSolver {
   constructor(grid) {
     super(grid);
+    this.solverType        = "wallfollower";
     this.showVisitedAlways = false;
     this._pos       = null;
     this._facing    = "north";
