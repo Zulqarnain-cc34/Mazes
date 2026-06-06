@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta http-equiv="X-UA-Compatible" content="IE=edge" />
-    <title>Prim's Maze</title>
+    <title>Maze Generator</title>
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <link rel="stylesheet" href="style.css" />
 
@@ -31,15 +31,39 @@
       .controls {
         display: flex;
         align-items: center;
-        gap: 16px;
+        gap: 12px;
         flex-wrap: wrap;
         justify-content: center;
       }
 
-      /* Hidden real input, visible styled label */
+      /* Styled select ─────────────────── */
+      .select-group {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        font-size: 13px;
+        font-family: monospace;
+        color: #555;
+      }
+
+      select {
+        padding: 6px 10px;
+        border: 1px solid #ccc;
+        border-radius: 6px;
+        background: #fff;
+        font-size: 13px;
+        font-family: monospace;
+        color: #1a1a2e;
+        cursor: pointer;
+        outline: none;
+      }
+
+      select:focus { border-color: #4e9af1; }
+
+      /* Upload button ──────────────────── */
       .upload-btn {
         display: inline-block;
-        padding: 8px 18px;
+        padding: 7px 16px;
         background: #1a1a2e;
         color: #eaeaea;
         border-radius: 6px;
@@ -51,6 +75,20 @@
 
       input[type="file"] { display: none; }
 
+      /* Export button ──────────────────── */
+      .export-btn {
+        padding: 7px 16px;
+        background: #27ae60;
+        color: #fff;
+        border: none;
+        border-radius: 6px;
+        font-size: 13px;
+        font-family: monospace;
+        cursor: pointer;
+      }
+      .export-btn:hover { background: #219150; }
+
+      /* Sliders ───────────────────────── */
       .slider-group {
         display: flex;
         align-items: center;
@@ -61,7 +99,7 @@
       }
 
       input[type="range"] {
-        width: 120px;
+        width: 110px;
         cursor: pointer;
         accent-color: #1a1a2e;
       }
@@ -71,11 +109,31 @@
         color: #aaa;
         font-family: monospace;
       }
+
+      /* Divider ───────────────────────── */
+      .sep {
+        color: #ddd;
+        font-size: 18px;
+        user-select: none;
+      }
     </style>
   </head>
 
   <body>
     <div class="controls">
+
+      <!-- Algorithm selector: adding a new generator only requires a new <option> here
+           and a corresponding class in board.js + branch in initMaze() in sketch.js -->
+      <div class="select-group">
+        <span>Algorithm:</span>
+        <select id="algorithm">
+          <option value="prims">Prim's</option>
+          <option value="dfs">DFS (Backtracker)</option>
+        </select>
+      </div>
+
+      <span class="sep">|</span>
+
       <label class="upload-btn" for="imgInput">Upload Image</label>
       <input type="file" id="imgInput" accept="image/*" />
 
@@ -91,10 +149,15 @@
         <span id="thresholdValue">128</span>
       </div>
 
-      <span class="hint">Dark pixels = maze &nbsp;|&nbsp; White = excluded</span>
+      <span class="sep">|</span>
+
+      <button class="export-btn" onclick="saveCanvas('maze','png')">Export PNG</button>
+
     </div>
 
-    <!-- Scripts at end of body so the DOM is fully ready when p5 calls setup() -->
+    <span class="hint">Dark pixels = maze cells &nbsp;|&nbsp; White = excluded &nbsp;|&nbsp; Click canvas to set start / end</span>
+
+    <!-- Scripts at end of body so the DOM is fully parsed before setup() runs -->
     <script src="https://cdn.jsdelivr.net/npm/p5@1/lib/p5.min.js"></script>
     <script src="board.js"></script>
     <script src="sketch.js"></script>

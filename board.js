@@ -36,6 +36,10 @@ class Cell {
       east:  true,
       west:  true,
     };
+
+    // Assigned by a generator when the cell is added to a region.
+    // -1 = not yet assigned. Used for multi-region color coding.
+    this.regionIndex = -1;
   }
 
   // Returns true if this cell has been added to the maze.
@@ -744,5 +748,324 @@ class DistanceMap {
     }
 
     return dist / this.maxDistance;
+  }
+}
+
+// ─────────────────────────────────────────────
+// MazeGenerator  (abstract base class)
+// Defines the contract every generator must fulfill.
+//
+// Subclasses must implement:
+//   init()           — reset and seed the first cell
+//   step(pickIndex)  — advance one cell, using pickIndex to
+//                      select from a list of candidates
+//
+// The base class provides:
+//   isDone()         — completion guard
+//   complete()       — drain all remaining steps at once
+//   cellsPerSecond   — live throughput counter
+//
+// Shared rendering properties:
+//   frontier         — the "active" cell list (frontier array
+//                      for Prim's, stack for DFS); used by
+//                      sketch.js to highlight pending work
+//   lastAddedCell    — the most recently visited cell (yellow dot)
+// ─────────────────────────────────────────────
+
+class MazeGenerator {
+  constructor(grid) {
+    if (!(grid instanceof MazeGrid)) {
+      throw new TypeError("MazeGenerator requires a MazeGrid.");
+    }
+    this.grid               = grid;
+    this.frontier           = [];   // active cell list — interpretation depends on subclass
+    this.lastAddedCell      = null;
+    this.done               = false;
+    this.currentRegionIndex = 0;    // incremented each time a new disconnected region starts
+    this._stepCount         = 0;
+    this._startTime         = null;
+  }
+
+  init() {
+    throw new Error(`${this.constructor.name}.init() is not implemented.`);
+  }
+
+  step() {
+    throw new Error(`${this.constructor.name}.step() is not implemented.`);
+  }
+
+  isDone() {
+    return this.done;
+  }
+
+  // Runs all remaining steps in one call.
+  // pickIndex signature: (candidateArray) → integer index
+  complete(pickIndex = (arr) => Math.floor(Math.random() * arr.length)) {
+    while (!this.done) this.step(pickIndex);
+  }
+
+  // Cells added per second since init() was called.
+  get cellsPerSecond() {
+    if (!this._startTime || this._stepCount === 0) return 0;
+    const elapsed = (Date.now() - this._startTime) / 1000;
+    return elapsed > 0.01 ? Math.round(this._stepCount / elapsed) : 0;
+  }
+}
+
+// ─────────────────────────────────────────────
+// PrimsGenerator  extends MazeGenerator
+// Randomised Prim's algorithm.
+// Grows the maze by always picking from the frontier
+// (a pool of passages that connect IN cells to OUT cells).
+// Supports disconnected regions: when one region's frontier
+// empties, it seeds the next unvisited OUT cell automatically.
+//
+// frontier entries = FrontierEntry objects { inCell, outCell }
+// ─────────────────────────────────────────────
+
+class PrimsGenerator extends MazeGenerator {
+  constructor(grid) {
+    super(grid);
+  }
+
+  init() {
+    this.frontier           = [];
+    this.lastAddedCell      = null;
+    this.done               = false;
+    this.currentRegionIndex = 0;
+    this._stepCount         = 0;
+    this._startTime         = null;
+
+    const startCell = this.grid.findFirstOutCell();
+    if (!startCell) { this.done = true; return; }
+    this._addCell(startCell);
+  }
+
+  step(pickIndex = (arr) => Math.floor(Math.random() * arr.length)) {
+    if (this.done) return;
+
+    while (this.frontier.length > 0) {
+      const i     = pickIndex(this.frontier);
+      const entry = this._removeAt(i);
+
+      if (entry.outCell.isIn()) continue; // already claimed by another passage
+
+      this.grid.removeWallBetween(entry.inCell, entry.outCell);
+      this._addCell(entry.outCell);
+      return;
+    }
+
+    // Current region exhausted — start the next disconnected region.
+    const next = this.grid.findFirstOutCell();
+    if (next) {
+      this.currentRegionIndex++;
+      this._addCell(next);
+    } else {
+      this.done = true;
+    }
+  }
+
+  _addCell(cell) {
+    cell.markIn();
+    cell.regionIndex = this.currentRegionIndex;
+    this.lastAddedCell = cell;
+    if (!this._startTime) this._startTime = Date.now();
+    this._stepCount++;
+
+    for (const { cell: neighbor } of this.grid.getNeighbors(cell.col, cell.row)) {
+      if (neighbor.isOut()) {
+        this.frontier.push(new FrontierEntry(cell, neighbor));
+      }
+    }
+  }
+
+  // O(1) swap-removal — order is irrelevant since we pick randomly anyway.
+  _removeAt(index) {
+    const entry = this.frontier[index];
+    this.frontier[index] = this.frontier[this.frontier.length - 1];
+    this.frontier.length--;
+    return entry;
+  }
+}
+
+// ─────────────────────────────────────────────
+// DFSGenerator  extends MazeGenerator
+// Recursive Backtracker (depth-first search).
+// Carves passages by always going deeper before backtracking,
+// producing long winding corridors with few dead ends — a
+// visually very different texture from Prim's.
+//
+// frontier = the current DFS stack (plain Cell objects).
+// Rendering shows the live path from the start to the cursor,
+// contracting as backtracking shrinks the stack.
+// ─────────────────────────────────────────────
+
+class DFSGenerator extends MazeGenerator {
+  constructor(grid) {
+    super(grid);
+  }
+
+  init() {
+    this.frontier           = [];   // doubles as the DFS stack
+    this.lastAddedCell      = null;
+    this.done               = false;
+    this.currentRegionIndex = 0;
+    this._stepCount         = 0;
+    this._startTime         = null;
+
+    const startCell = this.grid.findFirstOutCell();
+    if (!startCell) { this.done = true; return; }
+    this._enterCell(startCell);
+  }
+
+  // pickIndex selects which unvisited neighbor to explore next.
+  // For Perlin noise bias, pass noisePicker from sketch.js;
+  // the items passed are { direction, cell } objects from getNeighbors().
+  step(pickIndex = (arr) => Math.floor(Math.random() * arr.length)) {
+    if (this.done) return;
+
+    if (this.frontier.length === 0) {
+      // This region is fully explored — find the next disconnected region.
+      const next = this.grid.findFirstOutCell();
+      if (next) {
+        this.currentRegionIndex++;
+        this._enterCell(next);
+      } else {
+        this.done = true;
+      }
+      return;
+    }
+
+    const current      = this.frontier[this.frontier.length - 1];
+    const outNeighbors = this.grid.getNeighbors(current.col, current.row)
+      .filter(({ cell }) => cell.isOut());
+
+    if (outNeighbors.length > 0) {
+      // Carve a passage to the chosen unvisited neighbor.
+      const { cell: next } = outNeighbors[pickIndex(outNeighbors)];
+      this.grid.removeWallBetween(current, next);
+      this._enterCell(next);
+    } else {
+      // Dead end — backtrack.
+      this.frontier.pop();
+      this.lastAddedCell = this.frontier[this.frontier.length - 1] || null;
+    }
+  }
+
+  _enterCell(cell) {
+    cell.markIn();
+    cell.regionIndex = this.currentRegionIndex;
+    this.frontier.push(cell);
+    this.lastAddedCell = cell;
+    if (!this._startTime) this._startTime = Date.now();
+    this._stepCount++;
+  }
+}
+
+// ─────────────────────────────────────────────
+// MazeSolver  (abstract base class)
+// Defines the interface every pathfinding solver must fulfill.
+//
+// Subclasses must implement:
+//   init(startCell, endCell)  — reset and prepare
+//   step()                    — advance one search step
+//
+// Public state for rendering:
+//   visitedSet   — Set<Cell> of all explored cells (for BFS overlay)
+//   path         — Cell[] solution route (empty until found)
+//   pathIndexMap — Map<Cell, index> for O(1) path membership checks
+//   found        — true when the path exists
+//   done         — true when search is finished (found or exhausted)
+//   lastVisited  — most recently dequeued cell (for "frontier dot")
+// ─────────────────────────────────────────────
+
+class MazeSolver {
+  constructor(grid) {
+    if (!(grid instanceof MazeGrid)) {
+      throw new TypeError("MazeSolver requires a MazeGrid.");
+    }
+    this.grid         = grid;
+    this.startCell    = null;
+    this.endCell      = null;
+    this.done         = false;
+    this.found        = false;
+    this.path         = [];
+    this.pathIndexMap = new Map(); // Cell → index in path, for O(1) lookups
+    this.visitedSet   = new Set();
+    this.lastVisited  = null;
+  }
+
+  init()     { throw new Error(`${this.constructor.name}.init() is not implemented.`); }
+  step()     { throw new Error(`${this.constructor.name}.step() is not implemented.`); }
+  isDone()   { return this.done; }
+  complete() { while (!this.done) this.step(); }
+}
+
+// ─────────────────────────────────────────────
+// BFSSolver  extends MazeSolver
+// Breadth-first search pathfinder.
+// Guarantees the shortest path in an unweighted maze.
+//
+// To swap in A* or Dijkstra, create a new class extending
+// MazeSolver and implement init() + step(). No other file
+// needs to change — sketch.js only depends on the base interface.
+// ─────────────────────────────────────────────
+
+class BFSSolver extends MazeSolver {
+  constructor(grid) {
+    super(grid);
+    this._queue   = [];
+    this._parents = new Map(); // Cell → parent Cell (or null for startCell)
+  }
+
+  init(startCell, endCell) {
+    if (!(startCell instanceof Cell) || !(endCell instanceof Cell)) {
+      throw new TypeError("BFSSolver.init() requires two Cell instances.");
+    }
+
+    this.startCell    = startCell;
+    this.endCell      = endCell;
+    this.done         = false;
+    this.found        = false;
+    this.path         = [];
+    this.pathIndexMap = new Map();
+    this.visitedSet   = new Set([startCell]);
+    this.lastVisited  = null;
+    this._queue       = [startCell];
+    this._parents     = new Map([[startCell, null]]);
+  }
+
+  step() {
+    if (this.done) return;
+    if (this._queue.length === 0) { this.done = true; return; }
+
+    const current    = this._queue.shift();
+    this.lastVisited = current;
+
+    if (current === this.endCell) {
+      this.path         = this._reconstructPath();
+      this.pathIndexMap = new Map(this.path.map((c, i) => [c, i]));
+      this.found        = true;
+      this.done         = true;
+      return;
+    }
+
+    for (const neighbor of this.grid.getPassableNeighbors(current.col, current.row)) {
+      if (!this._parents.has(neighbor)) {
+        this._parents.set(neighbor, current);
+        this.visitedSet.add(neighbor);
+        this._queue.push(neighbor);
+      }
+    }
+  }
+
+  _reconstructPath() {
+    const path = [];
+    let cell = this.endCell;
+    while (cell !== null) {
+      path.unshift(cell);
+      cell = this._parents.get(cell);
+    }
+    return path;
   }
 }
